@@ -1,0 +1,85 @@
+import torch  
+from util import *
+
+class flashAttn(torch.nn.Module):
+    def __init__(self,head_dim, num_heads,device):
+        super(flashAttn, self).__init__()
+        self.num_heads = num_heads
+        self.head_dim  = head_dim
+        self.scaling = head_dim ** -0.5
+        self.device = device 
+    def forward(self, q,k,v,mask=None):
+        # k,v shape: s,h,d
+        # q  shape: qs,h,d
+        s  = k.size(0)
+        qs = q.size(0)
+        q = q.permute(1, 0, 2)* self.scaling # h,qs,d
+
+        if self.device=="cpu":
+           
+            if mask!=None:
+                indices = torch.nonzero(mask).squeeze()
+                k = k[indices,:,:]
+                v = v[indices,:,:]
+             
+            k = k.permute(1, 2, 0) # h,d,s
+            v = v.permute(1, 0, 2) # h,s,d
+            
+            attn_weights = torch.bmm(q,k) # h,qs,s
+            
+
+            max_scores, _ = attn_weights.max(dim=-1, keepdim=True) 
+            exp_scores = torch.exp(attn_weights - max_scores) 
+            sum_exp_scores = exp_scores.sum(dim=-1, keepdim=True)
+            
+            log_sum = (torch.log(sum_exp_scores)  + max_scores)*torch.tensor(1.4427) 
+             
+            attn_weights = exp_scores / sum_exp_scores 
+
+            value  = torch.bmm(attn_weights, v).permute(1,0,2) 
+             
+            if check_dtype(value,torch.float32): value = value.half() 
+            if check_dtype(log_sum,torch.float16): log_sum = log_sum.float() 
+
+            return  value.contiguous().pin_memory(),log_sum.squeeze(-1).permute(1,0).contiguous().pin_memory()
+
+               
+        else:
+             
+         
+           
+            k = k.permute(1, 2, 0)  # h,d,s
+             
+            v = v.permute(1, 0, 2)  # h,s,d
+             
+            attn_weights = torch.bmm(q, k) # h,qs,s
+            
+            # if mask==None:
+            #     logSum = torch.log( torch.sum(torch.exp(attn_weights),dim=-1) ).permute(1,0) # qs,h
+
+               
+            # else:
+
+            #     mask = mask.view( 1, 1, s) 
+                
+            #     logSum =torch.sum(torch.exp( torch.where(mask, attn_weights, 0)).permute(1,0,2),dim=-1)   
+
+            #     attn_weights = torch.where(mask, attn_weights, -1e4)
+
+            max_scores, _ = attn_weights.max(dim=-1, keepdim=True) 
+            exp_scores = torch.exp(attn_weights - max_scores) 
+            sum_exp_scores = exp_scores.sum(dim=-1, keepdim=True)
+            log_sum = (torch.log(sum_exp_scores)  + max_scores)*torch.tensor(1.4427) 
+            attn_weights = exp_scores / sum_exp_scores 
+            
+             
+            value = torch.bmm(attn_weights, v).permute(1,0,2)
+           
+
+
+             
+            if check_dtype(value,torch.float32): value = value.half() 
+            if check_dtype(log_sum,torch.float16):log_sum = log_sum.float() 
+            
+            return value.contiguous(), log_sum.squeeze(-1).permute(1,0).contiguous()
+    

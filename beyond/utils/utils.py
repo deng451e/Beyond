@@ -32,10 +32,17 @@ def check_dtype(x,type_):
 
 
 
-def check_device(x,type_):
+def check_tensor_device(x,type_):
 
     return x.device.type==type_
  
+
+
+
+
+def slice0d(x, start, end):
+    return x[start:end, ...]
+
 
 def slice1d(x, start, end):
     return x[:, start:end, ...]
@@ -47,3 +54,12 @@ def slice2d(x, start, end):
 
 def slice3d(x, start, end):
     return x[:, :, :, start:end, ...]
+
+ 
+
+DIM_TO_SLICE = {
+    0: slice0d,
+    1: slice1d,
+    2: slice2d,
+    3: slice3d,
+}

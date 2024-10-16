@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 import argparse
-from utils import * 
+from beyond.utils import * 
 import asyncio
 import time 
  

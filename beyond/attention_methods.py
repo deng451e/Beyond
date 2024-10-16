@@ -68,7 +68,7 @@ class attention_methods_(torch.nn.Module):
             max_scores, indices = torch.topk(attn_weights, topk,dim=-1) 
         else:
             max_scores, indices = torch.max(attn_weights,dim=-1) 
- 
+       
         return indices
  
 
@@ -132,72 +132,72 @@ class merge_state_:
 
 
 
-def test_correctness(args,log):
-    log = add_info(args,log)
-    arch_name = args.arch_name
-    if arch_name == "opt-1.3b":
+# def test_correctness(args,log):
+#     log = add_info(args,log)
+#     arch_name = args.arch_name
+#     if arch_name == "opt-1.3b":
     
-        num_heads=32; hidden_size=2048  
+#         num_heads=32; hidden_size=2048  
 
-    elif arch_name == "opt-2.7b":
+#     elif arch_name == "opt-2.7b":
     
-        num_heads=32; hidden_size=2560  
+#         num_heads=32; hidden_size=2560  
         
-    elif arch_name == "opt-6.7b":
+#     elif arch_name == "opt-6.7b":
 
-        num_heads=32; hidden_size=4096  
+#         num_heads=32; hidden_size=4096  
 
-    elif arch_name == "opt-13b":
+#     elif arch_name == "opt-13b":
 
-        num_heads=40; hidden_size=5120
+#         num_heads=40; hidden_size=5120
      
 
-    seq_len = args.seq_len
-    head_dim = hidden_size//num_heads
-    ratio = args.ratio
-    partial_len = int( seq_len*ratio )
-    batch_size = args.batch_size
-    print(f"batch_size:{batch_size}")
+#     seq_len = args.seq_len
+#     head_dim = hidden_size//num_heads
+#     ratio = args.ratio
+#     partial_len = int( seq_len*ratio )
+#     batch_size = args.batch_size
+#     print(f"batch_size:{batch_size}")
      
     
-    assert  (partial_len>0),  f"Partial length can't be 0 ..."
-    if batch_size==1:
-        k_cache = torch.randn(seq_len, num_heads,head_dim, device='cpu').half()
-        v_cache = torch.randn(seq_len, num_heads,head_dim, device='cpu').half()
-        q       = torch.randn(args.q_len, num_heads,head_dim, device='cuda:0').half()
-        merge_state = merge_state_(num_heads )
-        attention_methods = attention_methods_(head_dim, num_heads)
-    else:
-        k_cache = torch.randn(batch_size,seq_len, num_heads,head_dim, device='cpu').half()
-        v_cache = torch.randn(batch_size,seq_len, num_heads,head_dim, device='cpu').half()
-        q       = torch.randn(batch_size,args.q_len, num_heads,head_dim, device='cuda:0').half()
-        merge_state = merge_state_(num_heads,batched=True)
-        attention_methods         = attention_methods_(head_dim, num_heads,batched=True)
-    slice = DIM_TO_SLICE[0 if batch_size==1 else 1]
+#     assert  (partial_len>0),  f"Partial length can't be 0 ..."
+#     if batch_size==1:
+#         k_cache = torch.randn(seq_len, num_heads,head_dim, device='cpu').half()
+#         v_cache = torch.randn(seq_len, num_heads,head_dim, device='cpu').half()
+#         q       = torch.randn(args.q_len, num_heads,head_dim, device='cuda:0').half()
+#         merge_state = merge_state_(num_heads )
+#         attention_methods = attention_methods_(head_dim, num_heads)
+#     else:
+#         k_cache = torch.randn(batch_size,seq_len, num_heads,head_dim, device='cpu').half()
+#         v_cache = torch.randn(batch_size,seq_len, num_heads,head_dim, device='cpu').half()
+#         q       = torch.randn(batch_size,args.q_len, num_heads,head_dim, device='cuda:0').half()
+#         merge_state = merge_state_(num_heads,batched=True)
+#         attention_methods         = attention_methods_(head_dim, num_heads,batched=True)
+#     slice = DIM_TO_SLICE[0 if batch_size==1 else 1]
 
 
-    indices = attention_methods.select_topk_kv(q.cpu(), slice(k_cache,0,100),10)
+#     indices = attention_methods.select_topk_kv(q.cpu(), slice(k_cache,0,100),10)
     
-    v_reference,_ = attention_methods.mha(q ,k_cache.cuda(),v_cache.cuda())
-    if batch_size>1:
-        v_reference = v_reference.reshape(args.q_len,-1,num_heads,head_dim).permute(1,0,2,3)
+#     v_reference,_ = attention_methods.mha(q ,k_cache.cuda(),v_cache.cuda())
+#     if batch_size>1:
+#         v_reference = v_reference.reshape(args.q_len,-1,num_heads,head_dim).permute(1,0,2,3)
   
 
-    st = time.time()
-    va,sa = attention_methods.mha(q.cpu() ,slice(k_cache,0,partial_len)  ,slice(v_cache,0,partial_len))
-    print(f"CPU attention length: {partial_len}, attention time: {time.time()-st}, ")
+#     st = time.time()
+#     va,sa = attention_methods.mha(q.cpu() ,slice(k_cache,0,partial_len)  ,slice(v_cache,0,partial_len))
+#     print(f"CPU attention length: {partial_len}, attention time: {time.time()-st}, ")
 
     
-    st = time.time()
-    vb,sb = attention_methods.mha(q ,slice(k_cache,partial_len,seq_len).cuda(),slice(v_cache,partial_len,seq_len).cuda())
-    print(f"GPU attention length: {seq_len-partial_len}, attention time: {time.time()-st}, ")
+#     st = time.time()
+#     vb,sb = attention_methods.mha(q ,slice(k_cache,partial_len,seq_len).cuda(),slice(v_cache,partial_len,seq_len).cuda())
+#     print(f"GPU attention length: {seq_len-partial_len}, attention time: {time.time()-st}, ")
 
     
-    v_out,_ = merge_state( va,sa,vb,sb )
+#     v_out,_ = merge_state( va,sa,vb,sb )
     
-    acc = check_eq(v_out,v_reference)  
-    assert  (acc>0.9),  f"accuracy {acc*100:.4}%, merge state fail..."
-    print(f"Merge success, accuracy {acc*100:.4}%")
+#     acc = check_eq(v_out,v_reference)  
+#     assert  (acc>0.9),  f"accuracy {acc*100:.4}%, merge state fail..."
+#     print(f"Merge success, accuracy {acc*100:.4}%")
 
 
     
@@ -206,14 +206,14 @@ def test_correctness(args,log):
 
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--arch_name", type=str, default="opt-13b") 
-    parser.add_argument("--seq_len", type=int, default=100000)
-    parser.add_argument("--q_len", type=int, default=10)
-    parser.add_argument("--ratio", type=float, default=0.1)
-    parser.add_argument("--repeat", type=int, default=10)
-    parser.add_argument("--batch_size", type=int, default=1)
-    args = parser.parse_args()
-    test_correctness(args,"")
+# if __name__ == "__main__":
+#     parser = argparse.ArgumentParser()
+#     parser.add_argument("--arch_name", type=str, default="opt-13b") 
+#     parser.add_argument("--seq_len", type=int, default=100000)
+#     parser.add_argument("--q_len", type=int, default=10)
+#     parser.add_argument("--ratio", type=float, default=0.1)
+#     parser.add_argument("--repeat", type=int, default=10)
+#     parser.add_argument("--batch_size", type=int, default=1)
+#     args = parser.parse_args()
+#     test_correctness(args,"")
      

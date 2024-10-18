@@ -1,5 +1,4 @@
 import torch  
-import flashinfer 
 import argparse
 import time 
 from beyond.utils import *

@@ -2,31 +2,31 @@ import torch
 import flashinfer 
 import argparse
 import time 
-from utils import *
-
-class attention_methods_(torch.nn.Module):
-    def __init__(self,head_dim, num_heads,batched=False):
-        super(attention_methods_, self).__init__()
-        self.num_heads = num_heads
-        self.head_dim  = head_dim
-        self.scaling = head_dim ** -0.5
-        self.batched = batched
-
+from beyond.utils import *
+ 
     
-    def mha(self, q,k,v,blk_k=None):
+def mha_logSum( q,k,v):
             
-        if self.batched:
+        if q.dim()==4:
+            # batched config 
             s  = k.size(1)
             qs = q.size(1)
+            num_heads = q.size(2)
+            head_dim  = q.size(3)
+            scaling = head_dim ** -0.5
             batch_size = k.size(0)
             
-            q = q.permute(0, 2, 1, 3).reshape(batch_size  * self.num_heads, qs,  self.head_dim)* self.scaling # bh,qs,d
-            k = k.permute(0, 2, 3, 1).reshape(batch_size  * self.num_heads, self.head_dim, s) # bh,d,s
-            v = v.permute(0, 2, 1, 3).reshape(batch_size  * self.num_heads, s, self.head_dim) # bh,s,d
+            q = q.permute(0, 2, 1, 3).reshape(batch_size  * num_heads, qs,  head_dim)* scaling # bh,qs,d
+            k = k.permute(0, 2, 3, 1).reshape(batch_size  * num_heads, head_dim, s) # bh,d,s
+            v = v.permute(0, 2, 1, 3).reshape(batch_size  * num_heads, s, head_dim) # bh,s,d
         else:
+            # single query  config 
+            num_heads = q.size(1)
+            head_dim  = q.size(2)
+            scaling = head_dim ** -0.5
             s  = k.size(0)
             qs = q.size(0)
-            q = q.permute(1, 0, 2) * self.scaling # h,qs,d
+            q = q.permute(1, 0, 2) * scaling # h,qs,d
             k = k.permute(1, 2, 0) # h,d,s
             v = v.permute(1, 0, 2) # h,s,d
             
@@ -42,34 +42,9 @@ class attention_methods_(torch.nn.Module):
         
         if check_tensor_device(q,'cpu'):  return  value.contiguous().pin_memory(),log_sum.squeeze(-1).permute(1,0).contiguous().pin_memory()
         if check_tensor_device(q,'cuda'): return value.contiguous(), log_sum.squeeze(-1).permute(1,0).contiguous()
+ 
     
-    
-    def select_topk_kv(self, q,k,topk=None):
-        assert check_tensor_device(q,'cpu') , f"q should be on CPU"
-
-        if self.batched:
-            qs = q.size(1)
-            s  = k.size(1)
-            batch_size = k.size(0)
-            
-            q = q.permute(0, 2, 1, 3).reshape(batch_size  * self.num_heads, qs,  self.head_dim)* self.scaling # bh,qs,d
-            k = k.permute(0, 2, 3, 1).reshape(batch_size  * self.num_heads, self.head_dim, s) # bh,d,s
-             
-        else:
-            
-            q = q.permute(1, 0, 2) * self.scaling # h,qs,d
-            k = k.permute(1, 2, 0) # h,d,s
-            
-        
-        attn_weights = torch.bmm(q,k)  # h,qs,s  or bh,qs,s
-        attn_weights = torch.sum(attn_weights,dim=-2)
-      
-        if topk:
-            max_scores, indices = torch.topk(attn_weights, topk,dim=-1) 
-        else:
-            max_scores, indices = torch.max(attn_weights,dim=-1) 
-       
-        return indices
+     
  
 
 
@@ -81,7 +56,7 @@ class merge_state_:
        self.batched = batched
        self.in_place = in_place
 
-    def __call__(self, va,sa,vb,sb):
+    def __call__(self, va,sa,vb,sb,batched=False):
        
         assert check_tensor_device(va,'cpu') , f"va should be on CPU"
         assert check_tensor_device(sa,'cpu') , f"sa should be on CPU"
@@ -132,88 +107,89 @@ class merge_state_:
 
 
 
-# def test_correctness(args,log):
-#     log = add_info(args,log)
-#     arch_name = args.arch_name
-#     if arch_name == "opt-1.3b":
+def test_correctness(args,log):
+    log = add_info(args,log)
+    arch_name = args.arch_name
+    if arch_name == "opt-1.3b":
     
-#         num_heads=32; hidden_size=2048  
+        num_heads=32; hidden_size=2048  
 
-#     elif arch_name == "opt-2.7b":
+    elif arch_name == "opt-2.7b":
     
-#         num_heads=32; hidden_size=2560  
+        num_heads=32; hidden_size=2560  
         
-#     elif arch_name == "opt-6.7b":
+    elif arch_name == "opt-6.7b":
 
-#         num_heads=32; hidden_size=4096  
+        num_heads=32; hidden_size=4096  
 
-#     elif arch_name == "opt-13b":
+    elif arch_name == "opt-13b":
 
-#         num_heads=40; hidden_size=5120
+        num_heads=40; hidden_size=5120
      
 
-#     seq_len = args.seq_len
-#     head_dim = hidden_size//num_heads
-#     ratio = args.ratio
-#     partial_len = int( seq_len*ratio )
-#     batch_size = args.batch_size
-#     print(f"batch_size:{batch_size}")
+    seq_len = args.seq_len
+    head_dim = hidden_size//num_heads
+    ratio = args.ratio
+    partial_len = int( seq_len*ratio )
+    batch_size = args.batch_size
+    print(f"batch_size:{batch_size}")
      
     
-#     assert  (partial_len>0),  f"Partial length can't be 0 ..."
-#     if batch_size==1:
-#         k_cache = torch.randn(seq_len, num_heads,head_dim, device='cpu').half()
-#         v_cache = torch.randn(seq_len, num_heads,head_dim, device='cpu').half()
-#         q       = torch.randn(args.q_len, num_heads,head_dim, device='cuda:0').half()
-#         merge_state = merge_state_(num_heads )
-#         attention_methods = attention_methods_(head_dim, num_heads)
-#     else:
-#         k_cache = torch.randn(batch_size,seq_len, num_heads,head_dim, device='cpu').half()
-#         v_cache = torch.randn(batch_size,seq_len, num_heads,head_dim, device='cpu').half()
-#         q       = torch.randn(batch_size,args.q_len, num_heads,head_dim, device='cuda:0').half()
-#         merge_state = merge_state_(num_heads,batched=True)
-#         attention_methods         = attention_methods_(head_dim, num_heads,batched=True)
-#     slice = DIM_TO_SLICE[0 if batch_size==1 else 1]
-
-
-#     indices = attention_methods.select_topk_kv(q.cpu(), slice(k_cache,0,100),10)
+    assert  (partial_len>0),  f"Partial length can't be 0 ..."
+    if batch_size==1:
+        k_cache = torch.randn(seq_len, num_heads,head_dim, device='cpu').half()
+        v_cache = torch.randn(seq_len, num_heads,head_dim, device='cpu').half()
+        q       = torch.randn(args.q_len, num_heads,head_dim, device='cuda:0').half()
+        merge_state = merge_state_(num_heads )
+      
+    else:
+        k_cache = torch.randn(batch_size,seq_len, num_heads,head_dim, device='cpu').half()
+        v_cache = torch.randn(batch_size,seq_len, num_heads,head_dim, device='cpu').half()
+        q       = torch.randn(batch_size,args.q_len, num_heads,head_dim, device='cuda:0').half()
+        merge_state = merge_state_(num_heads,batched=True)
     
-#     v_reference,_ = attention_methods.mha(q ,k_cache.cuda(),v_cache.cuda())
-#     if batch_size>1:
-#         v_reference = v_reference.reshape(args.q_len,-1,num_heads,head_dim).permute(1,0,2,3)
-  
+    k_dim   = 0 if batch_size==1 else 1
+    slice = DIM_TO_SLICE[k_dim]
 
-#     st = time.time()
-#     va,sa = attention_methods.mha(q.cpu() ,slice(k_cache,0,partial_len)  ,slice(v_cache,0,partial_len))
-#     print(f"CPU attention length: {partial_len}, attention time: {time.time()-st}, ")
-
+ 
     
-#     st = time.time()
-#     vb,sb = attention_methods.mha(q ,slice(k_cache,partial_len,seq_len).cuda(),slice(v_cache,partial_len,seq_len).cuda())
-#     print(f"GPU attention length: {seq_len-partial_len}, attention time: {time.time()-st}, ")
+    v_reference,_ = mha_logSum(q ,k_cache.cuda(),v_cache.cuda())
+    if batch_size>1:
+        v_reference = v_reference.reshape(args.q_len,-1,num_heads,head_dim).permute(1,0,2,3)
+    
+    start  = 40
+    recent = 1024
+    st = time.time()
+    va,sa = mha_logSum(q.cpu() ,torch.cat([slice(k_cache,0,start),slice(k_cache,recent,seq_len)],dim=k_dim ) ,torch.cat([slice(v_cache,0,start),slice(v_cache,recent,seq_len)],dim=k_dim ))
+    print(f"CPU attention length: {partial_len}, attention time: {time.time()-st}, ")
 
     
-#     v_out,_ = merge_state( va,sa,vb,sb )
-    
-#     acc = check_eq(v_out,v_reference)  
-#     assert  (acc>0.9),  f"accuracy {acc*100:.4}%, merge state fail..."
-#     print(f"Merge success, accuracy {acc*100:.4}%")
-
+    st = time.time()
+    vb,sb = mha_logSum(q ,slice(k_cache,start,recent).cuda(),slice(v_cache,start,recent).cuda())
+    print(f"GPU attention length: {seq_len-partial_len}, attention time: {time.time()-st}, ")
 
     
+    v_out,_ = merge_state( va,sa,vb,sb )
+    
+    acc = check_eq(v_out,v_reference)  
+    assert  (acc>0.9),  f"accuracy {acc*100:.4}%, merge state fail..."
+    print(f"Merge success, accuracy {acc*100:.4}%")
+
+
+    
     
 
 
 
 
-# if __name__ == "__main__":
-#     parser = argparse.ArgumentParser()
-#     parser.add_argument("--arch_name", type=str, default="opt-13b") 
-#     parser.add_argument("--seq_len", type=int, default=100000)
-#     parser.add_argument("--q_len", type=int, default=10)
-#     parser.add_argument("--ratio", type=float, default=0.1)
-#     parser.add_argument("--repeat", type=int, default=10)
-#     parser.add_argument("--batch_size", type=int, default=1)
-#     args = parser.parse_args()
-#     test_correctness(args,"")
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--arch_name", type=str, default="opt-13b") 
+    parser.add_argument("--seq_len", type=int, default=100000)
+    parser.add_argument("--q_len", type=int, default=10)
+    parser.add_argument("--ratio", type=float, default=0.1)
+    parser.add_argument("--repeat", type=int, default=10)
+    parser.add_argument("--batch_size", type=int, default=1)
+    args = parser.parse_args()
+    test_correctness(args,"")
      

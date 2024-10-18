@@ -1,6 +1,4 @@
-[submodule "beyond/3rdparty/3dparty"]
-	path = beyond/3rdparty/3dparty
+[submodule "3rdparty/flashinfer"]
+	path = 3rdparty/flashinfer
 	url = git@github.com:deng451e/flashinfer.git
-[submodule "beyond/3rdparty/flashinfer"]
-	path = beyond/3rdparty/flashinfer
-	url = git@github.com:deng451e/flashinfer.git
+	update = recursive

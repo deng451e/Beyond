@@ -1,5 +1,2 @@
-torch==2.4.0+cu124
-torchaudio==2.4.0+cu124
-torchvision==0.19.0+cu124
 transformers==4.45.1
 cmake==3.30.4

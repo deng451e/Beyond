@@ -1,25 +1,32 @@
 import math
+import logging
 from typing import Optional, Tuple
-
+import os 
 import torch
 from torch import nn
+from beyond.utils import *
  
-import torch.utils.checkpoint
 
 import torch.nn.functional as F
 
 from beyond.selection_methods import selection_methods_
+
 from beyond.KVcache_manager import KVCache_manager_
 from beyond.attention_methods import (
     mha_logSum,
     merge_state_,
+    normal_mha,
 )
-from transformer import Llamaconfig 
+os.remove("DEBUG.log")
+logger = logging.getLogger(__name__)
+
+
 from transformers.models.llama.modeling_llama import (
     LlamaAttention,
     rotate_half,
     apply_rotary_pos_emb,
     repeat_kv,
+    LlamaRotaryEmbedding,
 )
 import types
 
@@ -27,115 +34,258 @@ __all__ = ["modify_llama_attention"]
 
 
 def apply_rotary_pos_emb_single(x, cos, sin, position_ids):
-    # The first two dimensions of cos and sin are always 1, so we can `squeeze` them.
-    cos = cos.squeeze(1).squeeze(0)  # [seq_len, dim]
-    sin = sin.squeeze(1).squeeze(0)  # [seq_len, dim]
+    # The first two dimensions of cos_gpu and sin_gpu are always 1, so we can `squeeze` them.
+    
+    cos = cos.squeeze(1).squeeze(0)       # [seq_len, dim]
+    sin = sin.squeeze(1).squeeze(0)       # [seq_len, dim]
+
     cos = cos[position_ids].unsqueeze(1)  # [bs, 1, seq_len, dim]
     sin = sin[position_ids].unsqueeze(1)  # [bs, 1, seq_len, dim]
     x_embed = (x * cos) + (rotate_half(x) * sin)
     return x_embed
+ 
 
-
-def modify_llama_attention_forward(
+def modified_llama_attention_forward(
     self,
     hidden_states: torch.Tensor,
     attention_mask: Optional[torch.Tensor] = None,
     position_ids: Optional[torch.LongTensor] = None,
+    past_key_value: Optional[Tuple[torch.Tensor]] = None,
     output_attentions: bool = False,
     use_cache: bool = False,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
-
-    batch_size, q_len, _ = hidden_states.size()
+  
+    batch_size, q_len, _ = hidden_states.size()  
       
     q_states = self.q_proj(hidden_states)
     k_states = self.k_proj(hidden_states)
     v_states = self.v_proj(hidden_states)
 
-
+    # b,h,s,d
+    q_states = q_states.view(batch_size, q_len, self.num_heads, self.head_dim).transpose(1, 2)
+    k_states = k_states.view(batch_size, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
+    v_states = v_states.view(batch_size, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
+ 
     #####################
     # Get Layer KVCache # 
     #####################
+     
+     
+    
+    k_cache_gpu,v_cache_gpu,k_cache_cpu,v_cache_cpu = self.KVCache_manager(self.attn_layer_idx) # b,h,s,d
 
-    k_cache_gpu,v_cache_gpu,k_cache_cpu,v_cache_cpu = self.KVCache_manager(self.attn_layer_idx) # b,s,h,d
-    self.increase_layer_idx()
+    
 
-    kv_seq_len = k_states.shape[-2]
-    if k_cache_gpu is not None:
-        kv_seq_len += k_cache_gpu[0].shape[-2] 
+    torch.cuda.synchronize()
 
-
-    if k_cache_cpu is not None:
-        kv_seq_len += k_cache_gpu[0].shape[-2] 
-
+    kv_seq_len = k_states.size(-2)
 
 
-    cos, sin = self.rotary_emb( seq_len=kv_seq_len)
-
-    recent_size = self.KVCache_manager.recent_sizes(self.attn_layer_idx)
-    start_size  = self.KVCache_manager.start_sizes(self.attn_layer_idx)
-    block_size  = self.KVCache_manager.block_sizes(self.attn_layer_idx)
- 
-    #####################
-    #   CPU Attention   # 
-    #####################
-    if k_cache_cpu is not None:
-        with torch.cuda.stream(self.cpu_stream):
-            q_cpu = q_states.clone().detach().to('cpu', non_blocking=True)
-            v_cpu,s_cpu = mha_logSum(q_cpu,k_cache_cpu,v_cache_cpu)
-
-    #####################
-    #   GPU Attention   # 
-    ################ 
-
-
-    ### Shift Pos: query pos is min(cache_size, idx)
-  
-    q_states = apply_rotary_pos_emb_single(q_states, cos, sin, position_ids)
-   
 
     if k_cache_gpu is not None:
-        # reuse k, v, self_attention
+
+        if self.attn_layer_idx==39:
+            info = f"GPU cache size: {k_cache_gpu.size(-2)}"
+            if k_cache_cpu is not None:  info +=  f" | CPU cache size: {k_cache_cpu.size(-2)}"
+            logger.info(info)
+
+        kv_seq_len += k_cache_gpu.size(-2) 
         k_cache_gpu = torch.cat([k_cache_gpu, k_states], dim=2)
         v_cache_gpu = torch.cat([v_cache_gpu, v_states], dim=2)
+    else:
+        k_cache_gpu = k_states
+        v_cache_gpu = v_states
+     
+     
+     
+    if k_cache_cpu is not None:
+        cpu_attn_size = min(k_cache_cpu.size(-2) ,self.KVCache_manager.cpu_attn_size[self.attn_layer_idx])
+        kv_seq_len += cpu_attn_size
+        start_size  = self.KVCache_manager.start_sizes[self.attn_layer_idx]
+        
+    
+    cos_gpu, sin_gpu = self.rotary_emb(v_states, seq_len=kv_seq_len)
+    q_position_ids = torch.arange(kv_seq_len-q_len,kv_seq_len,device=q_states.device).unsqueeze(0)
+    
+    q_states = apply_rotary_pos_emb_single(q_states, cos_gpu, sin_gpu, q_position_ids)
+    
+
+    if k_cache_cpu is not None:
+    
+       
+      
+     
+        # Mix CPU&GPU attention
+    
+
+        attention_mask_q = attention_mask if q_states.size(-2)!=1 else None 
+        #####################
+        #   CPU Attention   # 
+        #####################
+        with torch.cuda.stream(self.cpu_stream):
+            
+
+            # load appended token stats to CPU
+            k_cache_cpu = torch.cat([k_cache_cpu, k_states.to('cpu', non_blocking=True)], dim=2)
+            v_cache_cpu = torch.cat([v_cache_cpu, v_states.to('cpu', non_blocking=True)], dim=2)
+            q_cpu = q_states.detach().to('cpu', non_blocking=True)
+            attention_mask_q_cpu = attention_mask_q.to('cpu', non_blocking=True) if attention_mask_q is not None else attention_mask_q 
+            
+
+            cos_cpu, sin_cpu = self.rotary_emb_cpu(v_cache_cpu, seq_len=kv_seq_len)
+            position_ids_cpu = torch.cat([  
+                torch.arange(start_size, start_size+cpu_attn_size, device='cpu'),
+                torch.arange(kv_seq_len-q_len, kv_seq_len, device='cpu')
+                ],dim=0).unsqueeze(0)
+             
+            k_cache_cpu = apply_rotary_pos_emb_single(k_cache_cpu,  cos_cpu, sin_cpu, position_ids_cpu)
+            k_cache_cpu = repeat_kv(k_cache_cpu, self.num_key_value_groups)
+            v_cache_cpu = repeat_kv(v_cache_cpu, self.num_key_value_groups)
+            v_cpu,s_cpu = mha_logSum(q_cpu,k_cache_cpu,v_cache_cpu,attention_mask_q_cpu)
+    
+        
+        #####################   
+        #   GPU Attention   # 
+        ##################### 
+
+        position_ids_gpu = torch.cat([
+                torch.arange(0,start_size, device=k_cache_gpu.device),
+                torch.arange(start_size+cpu_attn_size, kv_seq_len, device=k_cache_gpu.device)
+                ],dim=0).unsqueeze(0)
+        
+      
+        k_cache_gpu = apply_rotary_pos_emb_single(k_cache_gpu,  cos_gpu, sin_gpu, position_ids_gpu)
+         
+        
+        k_cache_gpu = repeat_kv(k_cache_gpu, self.num_key_value_groups)
+        v_cache_gpu = repeat_kv(v_cache_gpu, self.num_key_value_groups)
+        
+     
+        v_gpu,s_gpu = mha_logSum(q_states,k_cache_gpu,v_cache_gpu,attention_mask_q)
+        
+        
+        # print(position_ids_cpu,position_ids_gpu)
+        # acc = check_eq(sin_cpu,sin_gpu.cuda())  
+        # print(f"layer {self.attn_layer_idx},accuracy {acc*100:.4}%, ")
+        # print('===================')
+        #####################
+        #    Merge State    # 
+        ##################### 
+        
+         
+        attn_output,_ = self.merge_state(v_cpu,s_cpu,v_gpu,s_gpu)
+       
+    # Default Full GPU attention
+    else:   
+    
+         
+         
+        
+        position_ids_gpu = torch.arange(kv_seq_len, device=k_cache_gpu.device).unsqueeze(0)
+       
+        k_cache_gpu = apply_rotary_pos_emb_single(k_cache_gpu, cos_gpu, sin_gpu, position_ids_gpu)
+        
+        
+        k_cache_gpu = repeat_kv(k_cache_gpu, self.num_key_value_groups)
+        v_cache_gpu = repeat_kv(v_cache_gpu, self.num_key_value_groups)
+      
+        
+        # subtract maximum value to improve numerical stability
+        attn_weights = torch.matmul(q_states, k_cache_gpu.transpose(2, 3)) / math.sqrt(self.head_dim)
+        max_scores, _ = attn_weights.max(dim=-1, keepdim=True) 
+        attn_weights = attn_weights - max_scores
+
+
+        if attention_mask is not None: 
+            attn_weights = attn_weights + attention_mask
+
+        attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float16).to(q_states.dtype)
+        attn_output = torch.matmul(attn_weights, v_cache_gpu)
+        
+ 
+    # # ##### remove later ######----
+    # if k_cache_cpu is not None:   
+        
+
+        
+    #     k_cache_gpu = torch.cat([k_cache_gpu[:,:,:start_size,:],k_cache_cpu[:,:,:kv_seq_len-q_len,:].cuda(),k_cache_gpu[:,:,start_size:,:]],dim=2)
+    #     v_cache_gpu = torch.cat([v_cache_gpu[:,:,:start_size,:],v_cache_cpu[:,:,:kv_seq_len-q_len,:].cuda(),v_cache_gpu[:,:,start_size:,:]],dim=2)
+
+    #     attention_mask_q_ = attention_mask  if q_states.size(-2)!=1 else None 
+    #     # attn_output_our,_ = mha_logSum(q_states,k_cache_gpu,v_cache_gpu,attention_mask_q_)
+    #     attn_output_our = normal_mha(q_states,k_cache_gpu,v_cache_gpu,attention_mask_q_)
+        
+    
+    #     attn_output_our = attn_output_our.reshape(-1, batch_size, self.num_heads,self.head_dim).permute(1,0,2,3)
+    #     acc = check_eq(attn_output_our,attn_output)  
+    #     print(f"layer {self.attn_layer_idx},accuracy {acc*100:.4}%, ")
+    #     # assert acc>0.9, f"{acc} invalid"
+            
+            
+    # # #### remove later ######----  
+        
 
     kv_cache_2add = (k_states, v_states) if use_cache else None
-    self.KVCache_manager.add_kv_cache_by_layer( kv_cache_2add,self.attn_layer_idx)
-    ### Shift Pos: key pos is the pos in cache
-    key_position_ids = torch.arange(kv_seq_len, device=position_ids.device).unsqueeze(0)
-    k_states = apply_rotary_pos_emb_single(k_states, cos, sin, key_position_ids)
-    ###
+    
+    self.KVCache_manager.add_kv_cache_by_layer(self.attn_layer_idx, kv_cache_2add)
+   
+     
+    attn_output = attn_output.transpose(1, 2).contiguous()
+    attn_output = attn_output.reshape(batch_size, q_len, self.hidden_size)
+     
+    attn_output = self.o_proj(attn_output)
+    
+    if not output_attentions:
+        attn_weights = None
 
-    # repeat k/v heads if n_kv_heads < n_heads
-    k_cache_gpu = repeat_kv(k_cache_gpu, self.num_key_value_groups)
-    v_cache_gpu = repeat_kv(v_cache_gpu, self.num_key_value_groups)
-
-    v_gpu,s_gpu = mha_logSum(q_states,k_cache_gpu,v_cache_gpu,attention_mask)
 
     
+     
+    return attn_output,past_key_value,past_key_value
+
+  
  
-    attn_output,_  = self.merge_state(v_cpu,s_cpu,v_gpu,s_gpu)
+def modify_llama_attention(model):
+    global layer_idx
+    config = model.config 
     
-
-    return attn_output
-
+    layer_idx = config.num_hidden_layers-1
+    head_dim = config.hidden_size//config.num_attention_heads
+    copy_stream = torch.cuda.Stream()
+    cpu_stream = torch.cuda.Stream()
+    KVCache_manager = KVCache_manager_(
+        copy_stream=copy_stream,
+        start_size=10,
+        recent_size=70,
+        k_seq_dim=2,
+        v_seq_dim=2,
+        head_dim=head_dim,
+        num_heads=config.num_attention_heads,
+        num_layers=config.num_hidden_layers,
+        gpu_cache_max=2000,
+        gpu_cache_device="cuda",
+    )
+     
+    rotary_emb_cpu = LlamaRotaryEmbedding(head_dim,device='cpu')
+    merge_state    = merge_state_(config.num_attention_heads)
+   
  
-
-def increase_layer_idx(self,):
-    self.attn_layer_idx  = (self.attn_layer_idx+1)%self.attn_layer_num
+    def replace_layer(model):
+        for name, module in reversed(model._modules.items()):
+            if len(list(module.children())) > 0:
+                replace_layer( module,)
+ 
+            if isinstance(module, LlamaAttention):
+                global layer_idx
+                
+                model._modules[name].attn_layer_idx  = layer_idx
+                model._modules[name].rotary_emb_cpu  = rotary_emb_cpu
+                model._modules[name].merge_state  = merge_state
+                model._modules[name].KVCache_manager = KVCache_manager
+                model._modules[name].cpu_stream = cpu_stream
+                model._modules[name].copy_stream = copy_stream
+                model._modules[name].forward = types.MethodType( modified_llama_attention_forward, model._modules[name])
+                layer_idx -= 1  # layer are reverseved travesed 
+    replace_layer(model)
  
  
-def modify_llama_attention(model,config):
-    model.KVCache_manager = KVCache_manager_()
-    model.merge_state  = merge_state_(config.num_attention_heads)
-    model.attn_layer_idx = 0
-    model.cpu_stream  = torch.cuda.Stream()
-    model.copy_stream  = torch.cuda.Stream()
-    model.attn_layer_num = config.num_hidden_layers 
-    model.increase =  types.MethodType(increase,model)
-      
-    for name, module in reversed(model._modules.items()):
-        if len(list(module.children())) > 0:
-            modify_llama_attention( module,)
-
-        if isinstance(module, LlamaAttention):
-            model._modules[name].forward = types.MethodType( modify_llama_attention_forward, model._modules[name])

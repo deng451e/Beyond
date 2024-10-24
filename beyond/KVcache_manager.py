@@ -37,11 +37,12 @@ class KVCache_manager_:
         self.kv_cache = [[None,None,None,None] for _ in range(num_layers)] 
         
         # statics  for tracking gpu kv blocks   
-        self.start_sizes   = [start_size  for _ in range(num_layers)]  
-        self.recent_sizes  = [recent_size  for _ in range(num_layers)] 
         self.gpu_cache_max = gpu_cache_max
         self.blk_size  = block_size
         self.gpu_cache_device = gpu_cache_device # device for offload gpu attn KV cache
+        self.start_sizes   = [start_size  for _ in range(num_layers)]  
+        self.recent_sizes  = [recent_size  for _ in range(num_layers)] 
+        
         
         # statics  for tracking cpu kv blocks
         self.cpu_kv_flags  = [False for _ in range(num_layers)]   
@@ -54,7 +55,7 @@ class KVCache_manager_:
     
 
     def __call__(self,idx):
-        assert idx<self.num_layers, f"invalid layer index {idx}"
+        assert 0<=idx<self.num_layers, f"invalid layer index {idx}"
         return self.kv_cache[idx]
 
     def usecase_warn(self,f,log):
@@ -64,7 +65,7 @@ class KVCache_manager_:
         self.recent_sizes[idx] = recent_size 
 
     
-    def modify_start_size_by_layer(self,idx,recent_size ):     
+    def modify_start_size_by_layer(self,idx,start_size ):     
         self.start_sizes[idx]  = start_size 
      
 
@@ -78,51 +79,53 @@ class KVCache_manager_:
         
         add_len   = k2add.size(self.k_seq_dim)
         gpu_cache_len = k_gpu.size(self.k_seq_dim) if k_gpu is not None else 0 
-        # self.usecase_warn(add_len>self.start_sizes[idx],f"query length > recent window at layer {idx}")
-        thresh = min(self.recent_sizes[idx]+self.start_sizes[idx],self.gpu_cache_max)
+         
+        bound = min(self.recent_sizes[idx]+self.start_sizes[idx],self.gpu_cache_max)
         with torch.cuda.stream(self.copy_stream):
-
 
             if gpu_cache_len==0:
         
             
                 ## case 1: no previous cache, added cache smaller than allowed on GPU
-                if add_len <= thresh: 
+                if add_len <= bound: 
+                   
                     self.kv_cache[idx] = [k2add, v2add,None,None]  
-                    return
+                      
                 
                 ## case 2:  no prevrious and added cache bigger than allowed on GPU, evict part to CPU
-                self.kv_cache[idx] = [
+                else:
+                    self.kv_cache[idx] = [
 
-                    #####################
-                    #   GPU kv cache    #
-                    #####################
-                    torch.cat(
-                        [
-                            self.k_slice(k_gpu, 0, self.start_sizes[idx]),
-                            self.k_slice(v_gpu, add_len - self.recent_sizes[idx] , add_len),
-                        ],
-                        dim=self.k_seq_dim,
-                    ),
-                    torch.cat(
-                        [
-                            self.v_slice(k_cpu, 0, self.start_sizes[idx]),
-                            self.v_slice(v_cpu, add_len - self.recent_sizes[idx] , add_len),
-                        ],
-                        dim=self.v_seq_dim,
-                    ),
-                    #####################
-                    #   CPU kv cache    #
-                    #####################
-                    self.k_slice(k2add, self.start_sizes[idx] , add_len - self.recent_sizes[idx]).to('cpu', non_blocking=True),
-                    self.v_slice(v2add, self.start_sizes[idx] , add_len - self.recent_sizes[idx]).to('cpu', non_blocking=True)
-                ]
+                        #####################
+                        #   GPU kv cache    #
+                        #####################
+                        torch.cat(
+                            [
+                                self.k_slice(k2add, 0, self.start_sizes[idx]),
+                                self.k_slice(k2add, add_len - self.recent_sizes[idx] , add_len),
+                            ],
+                            dim=self.k_seq_dim,
+                        ),
+
+                        torch.cat(
+                            [
+                                self.v_slice(v2add, 0, self.start_sizes[idx]),
+                                self.v_slice(v2add, add_len - self.recent_sizes[idx] , add_len),
+                            ],
+                            dim=self.v_seq_dim,
+                        ),
+                        #####################
+                        #   CPU kv cache    #
+                        #####################
+                        self.k_slice(k2add, self.start_sizes[idx] , add_len - self.recent_sizes[idx]).to('cpu', non_blocking=True),
+                        self.v_slice(v2add, self.start_sizes[idx] , add_len - self.recent_sizes[idx]).to('cpu', non_blocking=True)
+                    ]
                 
                 
             else:
+                
                 ## case 3: previous cache + added cache smaller than allowed on GPU
-                if add_len+gpu_cache_len<= thresh:
-                    
+                if add_len+gpu_cache_len<= bound:
                     
                     self.kv_cache[idx] = [
                     
@@ -150,17 +153,18 @@ class KVCache_manager_:
                         v_cpu,
                 
                     ]
-                ## case 4: previous cache + added cache bigger than allowed on GPU, added cache smaller than recent window size
+                 
                 elif add_len<  self.recent_sizes[idx] :
                     
-                    evict_len = add_len - (thresh-gpu_cache_len) 
-                    self.cpu_kv_flags[idx] = True
-                
-                    self.kv_cache[idx] = [
-                        
-                        #####################
-                        #   GPU kv cache    #
-                        #####################
+                     
+                    evict_len = add_len - (bound-gpu_cache_len) 
+                  
+                     
+                    ## case 4: previous cache + added cache bigger than allowed on GPU, added cache smaller than recent window size
+                    #####################
+                    #   GPU kv cache    #
+                    #####################
+                    self.kv_cache[idx][:2] = [
                         torch.cat(
                             [
                                 self.k_slice(k_gpu, 0, self.start_sizes[idx]),
@@ -176,30 +180,34 @@ class KVCache_manager_:
                                 v2add
                             ],
                             dim=self.v_seq_dim,
-                        ),
-                        #####################
-                        #   CPU kv cache    #
-                        #####################
-                        torch.cat(
-                            [
-                                k_cpu,
-                                self.k_slice(k_gpu, self.start_sizes[idx] , self.start_sizes[idx] + evict_len).to('cpu', non_blocking=True),
-                            ],
-                            dim=self.k_seq_dim,
-                        ) if k_cpu is not None else self.k_slice(k_gpu, self.start_sizes[idx] , self.start_sizes[idx] + evict_len).to('cpu', non_blocking=True),
-                        torch.cat(
-                            [
-                                v_cpu,
-                                self.k_slice(k_gpu,  self.start_sizes[idx] , self.start_sizes[idx] + evict_len).to('cpu', non_blocking=True),
-                                
-                            ],
-                            dim=self.v_seq_dim,
-                        ) if v_cpu is not None else self.v_slice(v_gpu, self.start_sizes[idx] , self.start_sizes[idx] + evict_len).to('cpu', non_blocking=True),
-                    
-                    
-                    ]
+                        )    ]
+                    #####################
+                    #   CPU kv cache    #
+                    #####################
+                    ## case 4.1: + have previous cpu cache
+                    if self.cpu_kv_flags[idx]:
+                        self.kv_cache[idx][2:] =[
+                            torch.cat(
+                                [
+                                    k_cpu,
+                                    self.k_slice(k_gpu, self.start_sizes[idx] , self.start_sizes[idx] + evict_len).to('cpu', non_blocking=True),
+                                ], dim=self.k_seq_dim),
+                            torch.cat(
+                                [
+                                    v_cpu,
+                                    self.v_slice(v_gpu,  self.start_sizes[idx] , self.start_sizes[idx] + evict_len).to('cpu', non_blocking=True),  
+                                ], dim=self.v_seq_dim) ]
+                    ## case 4.2: + no previous cpu cache
+                    else:
+                        self.kv_cache[idx][2:] =[
+                            self.k_slice(k_gpu, self.start_sizes[idx] , self.start_sizes[idx] + evict_len).to('cpu', non_blocking=True),
+                            self.v_slice(v_gpu, self.start_sizes[idx] , self.start_sizes[idx] + evict_len).to('cpu', non_blocking=True)]
+                        self.cpu_kv_flags[idx] = True
+                else:
+                        print("case 5")
 
-        self.update_blk_tracker_by_layer(idx)
+
+        # self.update_blk_tracker_by_layer(idx)
         return 
 
 
@@ -256,7 +264,7 @@ class KVCache_manager_:
                  print_(idx)
  
         return 
-
+ 
     def print_block_info(self,idx=None):
         if idx is not None:
             print(f"CPU blocks at Layer {idx}:{self.blk_num[idx]}")
@@ -270,18 +278,25 @@ class KVCache_manager_:
 
 
 
+ 
 
 
 
-# def load_kv_manager(config):
+
+
+
+
+
+
+
+
 
 
 
 def test_correctness(args,log):
     gpu_cache_device = "cuda"
     num_layers=32; seq_len = args.seq_len;num_heads=32;head_dim=128; batch_size=args.batch_size
-    k_cache = torch.randn(batch_size,num_heads, seq_len,head_dim, device=gpu_cache_device).half()
-    v_cache = torch.randn(batch_size,num_heads, seq_len,head_dim, device=gpu_cache_device).half()
+   
     batch_size = args.batch_size; block_size=args.block_size
     copy_stream = torch.cuda.Stream()
     KVCache_manager =  KVCache_manager_( 
@@ -289,12 +304,14 @@ def test_correctness(args,log):
                 block_size=block_size,
                 gpu_cache_device=gpu_cache_device,
                 num_layers=num_layers)
-    past_key_values =  [[k_cache,v_cache] for _ in range(num_layers)]
-
-
-    # test case 1: init kv cache 
-    KVCache_manager.add_kv_cache(past_key_values)
+    
     st = time.time()
+    # test case 1: init kv cache 
+    k_cache = torch.randn(batch_size,num_heads, seq_len,head_dim, device=gpu_cache_device).half()
+    v_cache = torch.randn(batch_size,num_heads, seq_len,head_dim, device=gpu_cache_device).half()
+    past_key_values =  [[k_cache,v_cache] for _ in range(num_layers)]
+    KVCache_manager.add_kv_cache(past_key_values)
+     
     
     
     # test case 2: add kv cache
@@ -309,7 +326,7 @@ def test_correctness(args,log):
        
     
     print("====================================")
-    # print(KVCache_manager(0)[2].device)
+    
     # test case 3: add kv cache by layer
     for add_len in [1,10,50,60,100,1000]:
         for idx in range(num_layers):
@@ -322,7 +339,7 @@ def test_correctness(args,log):
         KVCache_manager.print_gpu_coverage(0)
         KVCache_manager.print_block_info(0)
     print("====================================")
-    # print(KVCache_manager(0)[2].device)
+   
     print(f"time taken:{time.time()-st}")
 
 

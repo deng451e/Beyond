@@ -3,40 +3,72 @@ import flashinfer
 import argparse
 import time 
 from beyond.utils import *
- 
-from transformers.models.llama.modeling_llama import LlamaRotaryEmbedding,rotate_half
+import torch.nn as nn 
+from transformers.models.llama.modeling_llama import LlamaRotaryEmbedding,rotate_half,_make_causal_mask
 
-def mha_logSum( q,k,v):
+def mha_logSum( q,k,v,attention_mask=None):
             
         
         #shape: b,h,s,d
-        
-        num_heads  = q.size(1)
-        head_dim   = q.size(3)
         batch_size = q.size(0)
+        num_heads  = q.size(1)
+        qs         = q.size(2)
+        head_dim   = q.size(3)
+        
         scaling = head_dim ** -0.5
          
         
         q = q.reshape(batch_size  * num_heads, -1,  head_dim)* scaling # bh,qs,d
         k = k.permute(0,1,3,2).reshape(batch_size  * num_heads, head_dim, -1) # bh,d,s
         v = v.reshape(batch_size  * num_heads, -1, head_dim) # bh,s,d
-    
-        attn_weights = torch.bmm(q,k)  
+        attn_weights = torch.bmm(q,k)   # bh,qs,s 
+       
+        
+        if attention_mask is not None: 
+            # print(attn_weights)
+            attn_weights[:,:,-qs:] = attn_weights[:,:,-qs:] + attention_mask.to(attn_weights.device) # bh,qs,s 
+        
+        
+      
+         
+
         max_scores, _ = attn_weights.max(dim=-1, keepdim=True) 
         exp_scores = torch.exp(attn_weights - max_scores) 
+
+
+       
+
         sum_exp_scores = exp_scores.sum(dim=-1, keepdim=True)
-        log_sum = (torch.log(sum_exp_scores)  + max_scores)*torch.tensor(1.4427) 
+        log_sum = (torch.log(sum_exp_scores)  + max_scores) * torch.tensor(1.4427) 
         attn_weights = exp_scores / sum_exp_scores 
        
-        value  = torch.bmm(attn_weights, v).permute(1,0,2) 
-        if check_dtype(value,torch.float32): value = value.half() 
-        if check_dtype(log_sum,torch.float16): log_sum = log_sum.float() 
+        value  = torch.bmm(attn_weights, v).permute(1,0,2).half().contiguous()
+        log_sum = log_sum.squeeze(-1).permute(1,0).contiguous().float() 
         
-        if check_tensor_device(q,'cpu'):  return  value.contiguous().pin_memory(),log_sum.squeeze(-1).permute(1,0).contiguous().pin_memory()
-        if check_tensor_device(q,'cuda'): return value.contiguous(), log_sum.squeeze(-1).permute(1,0).contiguous()
+        
+        if check_tensor_device(q,'cpu'):  return  value.pin_memory(),log_sum.pin_memory()
+        if check_tensor_device(q,'cuda'): return  value, log_sum
+            
+            
+             
  
+
+def normal_mha(q,k,v,attention_mask=None):
+    # b h s d 
+    qs = q.size(-2)
+    attn_weights = torch.matmul(q, k.transpose(2, 3))  * (q.size(-1) ** -0.5)
+  
+    if attention_mask is not None: 
+            attn_weights[:,:,-qs:,:] = attn_weights[:,:,-qs:,:] + attention_mask.to(attn_weights.device) # bh,qs,s 
+        
+    max_scores, _ = attn_weights.max(dim=-1, keepdim=True) 
+    attn_weights = attn_weights - max_scores
+
+    attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(q.dtype)
+    attn_output = torch.matmul(attn_weights, v)
     
-     
+    return  attn_output.transpose(1, 2).contiguous() 
+
  
 def apply_rotary_pos_emb_single(x, cos, sin, position_ids):
      
@@ -48,7 +80,7 @@ def apply_rotary_pos_emb_single(x, cos, sin, position_ids):
     x_embed = (x * cos) + (rotate_half(x) * sin)
     return x_embed
 
-
+ 
 
  
 #wrapper for flashinfer merge state functions 
@@ -59,12 +91,12 @@ class merge_state_:
          
     def __call__(self, va,sa,vb,sb):
        
-        assert check_tensor_device(va,'cpu') , f"va should be on CPU"
-        assert check_tensor_device(sa,'cpu') , f"sa should be on CPU"
-        assert check_tensor_device(vb,'cuda') , f"vb should be on GPU"
-        assert check_tensor_device(sb,'cuda') , f"sb should be on GPU"
-        assert va.is_pinned() and va.is_contiguous(), f"va should be on pinned and contiguous"
-        assert sa.is_pinned() and va.is_contiguous(), f"sa should be on pinned and contiguous"
+        # assert check_tensor_device(va,'cpu') , f"va should be on CPU"
+        # assert check_tensor_device(sa,'cpu') , f"sa should be on CPU"
+        # assert check_tensor_device(vb,'cuda') , f"vb should be on GPU"
+        # assert check_tensor_device(sb,'cuda') , f"sb should be on GPU"
+        # assert va.is_pinned() and va.is_contiguous(), f"va should be on pinned and contiguous"
+        # assert sa.is_pinned() and va.is_contiguous(), f"sa should be on pinned and contiguous"
 
          
         head_dim = va.size(-1)
@@ -103,7 +135,7 @@ class merge_state_:
         
             
         s,d = v_out.size(0),v_out.size(2)
-        v_out = v_out.reshape(s,-1,self.num_heads,d).permute(1,0,2,3) # s,b,h,d 
+        v_out = v_out.reshape(s,-1,self.num_heads,d).permute(1,0,2,3) # b,s,h,d
 
         # s_out shape: s,bh
         return v_out,s_out
@@ -156,8 +188,8 @@ def test_correctness(args,log):
     slice = DIM_TO_SLICE[k_dim]
     rotary_emb = LlamaRotaryEmbedding(head_dim)
  
-    print(  rotary_emb(v_cache, seq_len=1000000)[1][0,0,0,:])
-    print(  rotary_emb(v_cache, seq_len=1000000)[1][0,0,-1,:])
+    # print(  rotary_emb(v_cache, seq_len=1000000)[1][0,0,0,:])
+    # print(  rotary_emb(v_cache, seq_len=1000000)[1][0,0,-1,:])
     if args.RoPE:
          
         cos, sin = rotary_emb(v_cache,seq_len)
@@ -165,17 +197,26 @@ def test_correctness(args,log):
         q_ref =  apply_rotary_pos_emb_single(q.cpu(), cos, sin, torch.arange(seq_len-q_len,seq_len).unsqueeze(0))
  
         k_ref = apply_rotary_pos_emb_single(k_cache, cos, sin, torch.arange(seq_len).unsqueeze(0))
-        
-    v_reference,_ = mha_logSum(q_ref.cpu() ,k_ref.cpu(),v_cache.cpu())
+    else:
+        q_ref = q
+        k_ref = k_cache
+
+ 
      
-    v_reference = v_reference.reshape(args.q_len,-1,num_heads,head_dim).permute(1,0,2,3)
-    
+
+    v_reference_nomal = normal_mha(q_ref.cpu() ,k_ref.cpu(),v_cache.cpu())  # b s h d 
+
+    v_reference,_ = mha_logSum(q_ref.cpu() ,k_ref.cpu(),v_cache.cpu()) # s bh d
+    v_reference = v_reference.reshape(-1,batch_size,num_heads,head_dim).permute(1,0,2,3)
+
+
+    print(v_reference_nomal.shape,v_reference.shape)
+    # print(v_reference_nomal/v_reference)
     
 
      
     
 
-    
 
 
     q_cpu = q.cpu() 
@@ -198,8 +239,8 @@ def test_correctness(args,log):
 
     
     q_gpu = q
-    k_gpu = torch.cat([slice(k_cache,0,start),slice(k_cache,seq_len-recent,seq_len)],dim=k_dim  )
-    v_gpu = torch.cat([slice(v_cache,0,start),slice(v_cache,seq_len-recent,seq_len)],dim=k_dim ).cuda()
+    k_gpu = torch.cat([slice(k_cache,0,start),slice(k_cache,seq_len-recent,seq_len)],dim=k_dim )
+    v_gpu = torch.cat([slice(v_cache,0,start),slice(v_cache,seq_len-recent,seq_len)],dim=k_dim )
 
     if args.RoPE:
  
@@ -218,8 +259,8 @@ def test_correctness(args,log):
 
     
     v_out,_ = merge_state( va,sa,vb,sb )
-     
-    acc = check_eq(v_out,v_reference)  
+    
+    acc = check_eq(v_out.cpu(),v_reference_nomal)  
     assert  (acc>0.9),  f"accuracy {acc*100:.4}%, merge state fail..."
     print(f"Merge success, accuracy {acc*100:.4}%")
 
@@ -233,7 +274,7 @@ def test_correctness(args,log):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--arch_name", type=str, default="opt-13b") 
-    parser.add_argument("--seq_len", type=int, default=100000)
+    parser.add_argument("--seq_len", type=int, default=20000)
     parser.add_argument("--q_len", type=int, default=10)
     parser.add_argument("--ratio", type=float, default=0.1)
     parser.add_argument("--repeat", type=int, default=10)

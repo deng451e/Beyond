@@ -3,21 +3,22 @@ import logging
 from typing import Optional, Tuple
 import os 
 import torch
+import torch.nn.functional as F
 from torch import nn
-from beyond.utils import *
  
 
-import torch.nn.functional as F
+ 
 
+from beyond.utils import *
+from beyond.loading import *
 from beyond.selection_methods import selection_methods_
-
 from beyond.KVcache_manager import KVCache_manager_
 from beyond.attention_methods import (
     mha_logSum,
     merge_state_,
     normal_mha,
 )
-os.remove("DEBUG.log")
+ 
 logger = logging.getLogger(__name__)
 
 
@@ -109,16 +110,16 @@ def modified_llama_attention_forward(
     
     q_states = apply_rotary_pos_emb_single(q_states, cos_gpu, sin_gpu, q_position_ids)
     
-
+     # Mix CPU&GPU attention
     if k_cache_cpu is not None:
     
        
       
      
-        # Mix CPU&GPU attention
+        
     
 
-        attention_mask_q = attention_mask if q_states.size(-2)!=1 else None 
+        attention_mask_q = attention_mask if q_len!=1 else None 
         #####################
         #   CPU Attention   # 
         #####################
@@ -164,10 +165,6 @@ def modified_llama_attention_forward(
         v_gpu,s_gpu = mha_logSum(q_states,k_cache_gpu,v_cache_gpu,attention_mask_q)
         
         
-        # print(position_ids_cpu,position_ids_gpu)
-        # acc = check_eq(sin_cpu,sin_gpu.cuda())  
-        # print(f"layer {self.attn_layer_idx},accuracy {acc*100:.4}%, ")
-        # print('===================')
         #####################
         #    Merge State    # 
         ##################### 
@@ -195,11 +192,14 @@ def modified_llama_attention_forward(
         max_scores, _ = attn_weights.max(dim=-1, keepdim=True) 
         attn_weights = attn_weights - max_scores
 
+        
 
         if attention_mask is not None: 
-            attn_weights = attn_weights + attention_mask
+            
+            attn_weights[:,:,:,-q_len:] = attn_weights[:,:,:,-q_len:] + attention_mask
 
         attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float16).to(q_states.dtype)
+        
         attn_output = torch.matmul(attn_weights, v_cache_gpu)
         
  
@@ -211,7 +211,7 @@ def modified_llama_attention_forward(
     #     k_cache_gpu = torch.cat([k_cache_gpu[:,:,:start_size,:],k_cache_cpu[:,:,:kv_seq_len-q_len,:].cuda(),k_cache_gpu[:,:,start_size:,:]],dim=2)
     #     v_cache_gpu = torch.cat([v_cache_gpu[:,:,:start_size,:],v_cache_cpu[:,:,:kv_seq_len-q_len,:].cuda(),v_cache_gpu[:,:,start_size:,:]],dim=2)
 
-    #     attention_mask_q_ = attention_mask  if q_states.size(-2)!=1 else None 
+    #     attention_mask_q_ = attention_mask  if q_len!=1 else None 
     #     # attn_output_our,_ = mha_logSum(q_states,k_cache_gpu,v_cache_gpu,attention_mask_q_)
     #     attn_output_our = normal_mha(q_states,k_cache_gpu,v_cache_gpu,attention_mask_q_)
         
@@ -256,7 +256,7 @@ def modify_llama_attention(model):
     KVCache_manager = KVCache_manager_(
         copy_stream=copy_stream,
         start_size=10,
-        recent_size=70,
+        recent_size=80,
         k_seq_dim=2,
         v_seq_dim=2,
         head_dim=head_dim,
@@ -265,7 +265,9 @@ def modify_llama_attention(model):
         gpu_cache_max=2000,
         gpu_cache_device="cuda",
     )
-     
+    # config_file = "/home/c3/code/Beyond/run-models/kv_manager_InitConfig/llama-vicuna-13b-v1.3.json"
+    KVCache_manager = set_kv_manager_config(KVCache_manager,config_file)
+
     rotary_emb_cpu = LlamaRotaryEmbedding(head_dim,device='cpu')
     merge_state    = merge_state_(config.num_attention_heads)
    

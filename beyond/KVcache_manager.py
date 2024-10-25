@@ -52,8 +52,7 @@ class KVCache_manager_:
         self.blk_min_max = None 
          
          
-    
-
+ 
     def __call__(self,idx):
         assert 0<=idx<self.num_layers, f"invalid layer index {idx}"
         return self.kv_cache[idx]

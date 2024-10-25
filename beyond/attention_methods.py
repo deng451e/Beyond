@@ -5,6 +5,9 @@ import time
 from beyond.utils import *
 import torch.nn as nn 
 from transformers.models.llama.modeling_llama import LlamaRotaryEmbedding,rotate_half,_make_causal_mask
+import logging 
+
+logger = logging.getLogger(__name__)
 
 def mha_logSum( q,k,v,attention_mask=None):
             
@@ -25,11 +28,12 @@ def mha_logSum( q,k,v,attention_mask=None):
        
         
         if attention_mask is not None: 
-            # print(attn_weights)
-            attn_weights[:,:,-qs:] = attn_weights[:,:,-qs:] + attention_mask.to(attn_weights.device) # bh,qs,s 
+            # logger.info(attention_mask)
+            # logger.info(attention_mask.shape)
+            # logger.info('---------------------------------')
+            attn_weights[:,:,-qs:] = attn_weights[:,:,-qs:] + attention_mask # bh,qs,s 
         
         
-      
          
 
         max_scores, _ = attn_weights.max(dim=-1, keepdim=True) 
@@ -70,6 +74,8 @@ def normal_mha(q,k,v,attention_mask=None):
     return  attn_output.transpose(1, 2).contiguous() 
 
  
+
+
 def apply_rotary_pos_emb_single(x, cos, sin, position_ids):
      
     # The first two dimensions of cos and sin are always 1, so we can `squeeze` them.
@@ -91,12 +97,12 @@ class merge_state_:
          
     def __call__(self, va,sa,vb,sb):
        
-        # assert check_tensor_device(va,'cpu') , f"va should be on CPU"
-        # assert check_tensor_device(sa,'cpu') , f"sa should be on CPU"
-        # assert check_tensor_device(vb,'cuda') , f"vb should be on GPU"
-        # assert check_tensor_device(sb,'cuda') , f"sb should be on GPU"
-        # assert va.is_pinned() and va.is_contiguous(), f"va should be on pinned and contiguous"
-        # assert sa.is_pinned() and va.is_contiguous(), f"sa should be on pinned and contiguous"
+        assert check_tensor_device(va,'cpu') , f"va should be on CPU"
+        assert check_tensor_device(sa,'cpu') , f"sa should be on CPU"
+        assert check_tensor_device(vb,'cuda') , f"vb should be on GPU"
+        assert check_tensor_device(sb,'cuda') , f"sb should be on GPU"
+        assert va.is_pinned() and va.is_contiguous(), f"va should be on pinned and contiguous"
+        assert sa.is_pinned() and va.is_contiguous(), f"sa should be on pinned and contiguous"
 
          
         head_dim = va.size(-1)
@@ -147,6 +153,9 @@ class merge_state_:
 
 
 
+
+
+
 def test_correctness(args,log):
     log = add_info(args,log)
     arch_name = args.arch_name
@@ -187,9 +196,7 @@ def test_correctness(args,log):
     k_dim   =  2
     slice = DIM_TO_SLICE[k_dim]
     rotary_emb = LlamaRotaryEmbedding(head_dim)
- 
-    # print(  rotary_emb(v_cache, seq_len=1000000)[1][0,0,0,:])
-    # print(  rotary_emb(v_cache, seq_len=1000000)[1][0,0,-1,:])
+  
     if args.RoPE:
          
         cos, sin = rotary_emb(v_cache,seq_len)
@@ -211,7 +218,7 @@ def test_correctness(args,log):
 
 
     print(v_reference_nomal.shape,v_reference.shape)
-    # print(v_reference_nomal/v_reference)
+     
     
 
      

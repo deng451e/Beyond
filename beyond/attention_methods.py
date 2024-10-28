@@ -175,8 +175,8 @@ def test_correctness(args,log):
 
         num_heads=40; hidden_size=5120
      
-    start  = 40
-    recent = 1024
+    start  = args.start_size
+    recent = args.recent_size
     seq_len = args.seq_len
     head_dim = hidden_size//num_heads
     ratio = args.ratio
@@ -213,11 +213,9 @@ def test_correctness(args,log):
 
     v_reference_nomal = normal_mha(q_ref.cpu() ,k_ref.cpu(),v_cache.cpu())  # b s h d 
 
-    v_reference,_ = mha_logSum(q_ref.cpu() ,k_ref.cpu(),v_cache.cpu()) # s bh d
-    v_reference = v_reference.reshape(-1,batch_size,num_heads,head_dim).permute(1,0,2,3)
-
-
-    print(v_reference_nomal.shape,v_reference.shape)
+    # v_reference,_ = mha_logSum(q_ref.cpu() ,k_ref.cpu(),v_cache.cpu()) # s bh d
+    # v_reference = v_reference.reshape(-1,batch_size,num_heads,head_dim).permute(1,0,2,3)
+    # print(v_reference_nomal.shape,v_reference.shape)
      
     
 
@@ -280,12 +278,14 @@ def test_correctness(args,log):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--arch_name", type=str, default="opt-13b") 
-    parser.add_argument("--seq_len", type=int, default=20000)
+    parser.add_argument("--arch_name", type=str, default="opt-13b")
+    parser.add_argument("--start_size", type=int, default=400)
+    parser.add_argument("--recent_size", type=int, default=1000) 
+    parser.add_argument("--seq_len", type=int, default=1500)
     parser.add_argument("--q_len", type=int, default=10)
     parser.add_argument("--ratio", type=float, default=0.1)
     parser.add_argument("--repeat", type=int, default=10)
-    parser.add_argument("--batch_size", type=int, default=1)
+    parser.add_argument("--batch_size", type=int, default=5)
     parser.add_argument("--RoPE", type=bool, default=True )
     args = parser.parse_args()
     test_correctness(args,"")

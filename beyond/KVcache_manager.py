@@ -18,7 +18,8 @@ class KVCache_manager_:
         head_dim=128,
         num_heads=32,
         num_layers=32,
-        gpu_cache_max=2000,
+        gpu_cache_max=5000,
+        cpu_attn_size=1000,
         gpu_cache_device="cpu",
     ):
         print(f"GPU attn device:{gpu_cache_device}")
@@ -46,7 +47,7 @@ class KVCache_manager_:
         
         # statics  for tracking cpu kv blocks
         self.cpu_kv_flags  = [False for _ in range(num_layers)]   
-        self.cpu_attn_size = [1000 for _ in range(num_layers)] 
+        self.cpu_attn_sizes = [cpu_attn_size for _ in range(num_layers)] 
         self.blk_num       = [0 for _ in range(num_layers)] 
         self.blk_tracker = None 
         self.blk_min_max = None 
@@ -205,6 +206,8 @@ class KVCache_manager_:
                 else:
                         print("case 5")
 
+        # if idx==self.num_layers-1:
+        #     torch.cuda.synchronize()
 
         # self.update_blk_tracker_by_layer(idx)
         return 
@@ -250,7 +253,7 @@ class KVCache_manager_:
   
       
  
-    def print_gpu_coverage(self,idx=None):
+    def print_kv_static(self,idx=None):
         def print_(idx):
             k_gpu,v_gpu,k_cpu,v_cpu = self.kv_cache[idx]
             gpu_len = k_gpu.size(self.k_seq_dim) if k_gpu is not None else 0 
@@ -263,7 +266,18 @@ class KVCache_manager_:
                  print_(idx)
  
         return 
- 
+    
+
+    def print_coverage(self,idx=None):
+        if idx is not None:
+            print(f"GPU coverage at Layer {idx}:{self.start_sizes[idx]}~{self.recent_sizes[idx]}")
+        else:
+            for idx in range( self.num_layers):
+                print(f"GPU coverage at Layer {idx}:{self.start_sizes[idx]}~{self.recent_sizes[idx]}")
+
+        return 
+
+
     def print_block_info(self,idx=None):
         if idx is not None:
             print(f"CPU blocks at Layer {idx}:{self.blk_num[idx]}")
@@ -347,7 +361,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--batch_size", type=int, default=10)
     parser.add_argument("--block_size", type=int, default=10)
-    parser.add_argument("--seq_len", type=int, default=100)
+    parser.add_argument("--seq_len", type=int, default=1)
     parser.add_argument("--q_len", type=int, default=10)
     args = parser.parse_args()
     test_correctness(args,"")

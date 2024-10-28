@@ -20,7 +20,6 @@ from transformers import (
 
  
 def load_model(model_name_or_path):
-    print(f"Loading model from {model_name_or_path} ...")
     # however, tensor parallel for running falcon will occur bugs
     tokenizer = AutoTokenizer.from_pretrained(
         model_name_or_path,
@@ -90,8 +89,9 @@ def set_kv_manager_config( KVCache_manager,file_path=None):
     
     KVCache_manager.gpu_cache_device = config['gpu_cache_device']
     for idx in range(KVCache_manager.num_layers):
-        KVCache_manager.start_sizes[idx] = config[f"layer {idx}"]["start_sizes"]
-        KVCache_manager.cpu_attn_size[idx] = config[f"layer {idx}"]["cpu_attn_size"]
+        KVCache_manager.start_sizes[idx] = config[f"layer {idx}"]["start_size"]
+        KVCache_manager.recent_sizes[idx] = config[f"layer {idx}"]["recent_size"]
+        KVCache_manager.cpu_attn_sizes[idx] = config[f"layer {idx}"]["cpu_attn_size"]
         KVCache_manager.blk_num[idx] = config[f"layer {idx}"]["block_size"]
 
     return KVCache_manager  

@@ -31,7 +31,8 @@ def check_memory(x,name):
     print('=================')
 
 def check_eq(x,y):
-    return (torch.isclose(x.cpu(), y.cpu(), rtol=1e-3, atol=1e-3).sum()/torch.numel(x)).cpu().numpy()
+    #	FP16 has a precision of about 3 to 4 decimal digits.
+    return (torch.isclose(x.cpu(), y.cpu(), rtol=1e-3, atol=1e-4).sum()/torch.numel(x)).cpu().numpy()
     
 def check_dtype(x,type_):
     return type(x.dtype)==type(type_)

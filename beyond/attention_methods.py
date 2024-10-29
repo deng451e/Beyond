@@ -132,10 +132,6 @@ class merge_state_:
 
  
 
- 
- 
-
-
 
 
 
@@ -197,10 +193,6 @@ def test_correctness(args,log):
    
     v_reference_nomal,_ = mha_lse(q_ref.cpu() ,k_ref.cpu(),v_cache.cpu())  # b s h d 
     v_reference_nomal = v_reference_nomal.reshape(-1,batch_size,num_heads,head_dim).permute(1,0,2,3)
-    
-    # v_reference,_ = mha_lse(q_ref.cpu() ,k_ref.cpu(),v_cache.cpu()) # s bh d
-    # v_reference = v_reference.reshape(-1,batch_size,num_heads,head_dim).permute(1,0,2,3)
-    # print(v_reference_nomal.shape,v_reference.shape)
      
     q_cpu = q.cpu() 
     k_cpu = slice(k_cache,start,seq_len-recent) 
@@ -247,16 +239,22 @@ def test_correctness(args,log):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     
+    
+    parser.add_argument("--start_size", type=int, default=4)
+    parser.add_argument("--recent_size", type=int, default=50) 
+    parser.add_argument("--seq_len", type=int, default=78)
+    parser.add_argument("--q_len", type=int, default=10)
+
+    # model config 
     parser.add_argument("--num_heads", type=int, default=32)
     parser.add_argument("--hidden_size", type=int, default=4096)
     parser.add_argument("--model_type", type=str, default="gpt-neox")
-    parser.add_argument("--start_size", type=int, default=4)
-    parser.add_argument("--recent_size", type=int, default=400) 
-    parser.add_argument("--seq_len", type=int, default=1000)
-    parser.add_argument("--q_len", type=int, default=10)
+    parser.add_argument("--RoPE", type=bool, default=True )
+    
+    # test config 
     parser.add_argument("--repeat", type=int, default=10)
     parser.add_argument("--batch_size", type=int, default=5)
-    parser.add_argument("--RoPE", type=bool, default=True )
+     
     args = parser.parse_args()
     test_correctness(args,"")
      

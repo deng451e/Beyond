@@ -13,7 +13,7 @@ import sys
 from tqdm import tqdm
 from beyond.utils import *
 from beyond.loading import * 
-from beyond.models.modify_llama import modify_llama_attention
+from beyond.models.modify_opt import modify_opt_attention
 
 
 logger = logging.getLogger(__name__)
@@ -137,7 +137,7 @@ def main(args):
  
         KVCache_manager.print_coverage()
 
-        modify_llama_attention(model,KVCache_manager)
+        modify_opt_attention(model,KVCache_manager)
     
     # start inference 
     inference(
@@ -154,8 +154,8 @@ if __name__ == "__main__":
     logging.basicConfig(filename='KV_cache_statics.log', level=logging.INFO)
     
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config_file_path", type=str, default="kv_manager_InitConfig/llama-vicuna-13b-v1.3.json")
-    parser.add_argument("--model_name_or_path", type=str, default="lmsys/vicuna-13b-v1.3")
+    parser.add_argument("--config_file_path", type=str, default="kv_manager_InitConfig/opt-13b.json")
+    parser.add_argument("--model_name_or_path", type=str, default="facebook/opt-13b")
     parser.add_argument("--data_root", type=str, default="data/mt_bench.jsonl")
     parser.add_argument("--enable_modify", action="store_true")
     args = parser.parse_args()

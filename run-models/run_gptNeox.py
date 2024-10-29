@@ -14,9 +14,8 @@ from tqdm import tqdm
 from beyond.utils import *
 from beyond.loading import * 
 from beyond.models.modify_gptNeox import modify_GPTNeoX_attention
-from datasets import load_dataset
-from datasets import load_dataset
-
+ 
+ 
 
 logger = logging.getLogger(__name__)
 
@@ -106,23 +105,10 @@ def main(args):
 
     # load dataset 
    
-    
-    print(f"Loading data from {args.data_root} ...")
-    list_data = load_dataset(args.data_root)['train']
-    
-     
-    prompts = []
-    outputs = []
-    cnt = 100
-    for sample in list_data :
-        
-        hold =  sample['instruction']+ ': '+ sample['input'] if sample['input'] else sample['instruction']
-        prompts += [hold]
-        outputs += [sample['output']]
-         
-        cnt -= 1 
-        if cnt==0:
-            break
+    # load dataset 
+  
+
+    prompts,outputs = load_dataset_(args.data_root)
  
     
     ## load model 
@@ -139,7 +125,7 @@ def main(args):
          
         config = model.config 
         KVCache_manager = KVCache_manager_(
-            start_size=4,
+            start_size=10,
             recent_size=50,
             k_seq_dim=2,
             v_seq_dim=2,

@@ -14,7 +14,7 @@ from tqdm import tqdm
 from beyond.utils import *
 from beyond.loading import * 
 from beyond.models.modify_gptNeox import modify_GPTNeoX_attention
- 
+from beyond.KVcache_manager import KVCache_manager_
  
 
 logger = logging.getLogger(__name__)
@@ -104,11 +104,7 @@ def main(args):
     
 
     # load dataset 
-   
-    # load dataset 
-  
-
-    prompts,outputs = load_dataset_(args.data_root)
+    prompts,_ = load_dataset_(args.data_root)
  
     
     ## load model 

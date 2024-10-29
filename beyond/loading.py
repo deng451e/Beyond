@@ -1,22 +1,12 @@
 
 
 import torch  
- 
-import argparse
- 
 import os.path as osp
 import ssl
 import urllib.request
 import os
 import json
-from datasets import load_dataset
-from beyond.KVcache_manager import KVCache_manager_
-from transformers import (
-    AutoTokenizer,
-    AutoModelForCausalLM,
-)
-
-
+  
  
 
 def set_kv_manager_config( KVCache_manager,file_path=None):
@@ -35,6 +25,11 @@ def set_kv_manager_config( KVCache_manager,file_path=None):
     return KVCache_manager  
  
 def load_model(model_name_or_path):
+    from transformers import (
+    AutoTokenizer,
+    AutoModelForCausalLM,
+    )
+
     # however, tensor parallel for running falcon will occur bugs
     tokenizer = AutoTokenizer.from_pretrained(
         model_name_or_path,
@@ -103,7 +98,8 @@ def load_dataset_(dataset_path,cnt=100):
     prompts = []
     outputs = []
     print(f"Loading data from {dataset_path} ...")
-
+    if "data/"  not in dataset_path:
+        from datasets import load_dataset
     match dataset_path:
         case "data/mt_bench.jsonl":
             test_filepath = os.path.join(dataset_path)
@@ -116,8 +112,8 @@ def load_dataset_(dataset_path,cnt=100):
             for sample in list_data:
                 prompts += sample["turns"]
                 
-        case _:
-
+        case "hakurei/open-instruct-v1":
+            
             list_data = load_dataset(dataset_path)['train']
             # truncate datset size           
             
@@ -130,6 +126,21 @@ def load_dataset_(dataset_path,cnt=100):
                 cnt -= 1 
                 if cnt==0:
                     break
-
+        case "facebook/Multi-IF":
+            list_data = load_dataset(dataset_path)['train']
+            # truncate datset size           
+            
+            for sample in list_data :
+               
+             
+            
+                prompts += [ sample['turn_1_prompt'].split(":")[2][2:-2]]
+                prompts += [ sample['turn_2_prompt'].split(":")[2][2:-2]]
+                prompts += [ sample['turn_3_prompt'].split(":")[2][2:-2]]
+                 
+                
+                cnt -= 1 
+                if cnt==0:
+                    break
 
     return prompts,outputs

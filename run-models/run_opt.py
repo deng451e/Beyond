@@ -14,7 +14,7 @@ from tqdm import tqdm
 from beyond.utils import *
 from beyond.loading import * 
 from beyond.models.modify_opt import modify_opt_attention
-
+from beyond.KVcache_manager import KVCache_manager_
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +82,7 @@ def inference(model, tokenizer, prompts, KVCache_manager=None, max_gen_len=1000,
   
     for idx, prompt in enumerate(prompts):
         
-        prompt = "USER: " + prompt + "\n\nASSISTANT: "
+        prompt = "USER: " + prompt 
         print("\n" + prompt, end="")
         input_ids = tokenizer(prompt, return_tensors="pt").input_ids
         logger.info(f"================================")
@@ -102,8 +102,6 @@ def main(args):
     
 
     # load dataset 
-  
-
     prompts,_ = load_dataset_(args.data_root)
 
     # load model 
@@ -157,6 +155,7 @@ if __name__ == "__main__":
     parser.add_argument("--config_file_path", type=str, default="kv_manager_InitConfig/opt-13b.json")
     parser.add_argument("--model_name_or_path", type=str, default="facebook/opt-13b")
     parser.add_argument("--data_root", type=str, default="data/mt_bench.jsonl")
+    
     parser.add_argument("--enable_modify", action="store_true")
     args = parser.parse_args()
     main(args)

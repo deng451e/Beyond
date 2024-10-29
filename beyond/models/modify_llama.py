@@ -1,11 +1,12 @@
 import math
 import logging
-from typing import Optional, Tuple
+ 
+import types
 import os 
 import torch
 import torch.nn.functional as F
 from torch import nn
- 
+from typing import Optional, Tuple
 
  
 
@@ -13,9 +14,8 @@ from beyond.utils import *
 from beyond.selection_methods import selection_methods_
 from beyond.KVcache_manager import KVCache_manager_
 from beyond.attention_methods import (
-    mha_logSum,
+    mha_lse_methods,
     merge_state_,
-    normal_mha,
 )
  
 logger = logging.getLogger(__name__)
@@ -28,7 +28,7 @@ from transformers.models.llama.modeling_llama import (
     repeat_kv,
     LlamaRotaryEmbedding,
 )
-import types
+ 
 
 __all__ = ["modify_llama_attention"]
 
@@ -135,7 +135,7 @@ def modified_llama_attention_forward(
             k_cache_cpu = apply_rotary_pos_emb_single(k_cache_cpu,  cos_cpu, sin_cpu, position_ids_cpu)
             k_cache_cpu = repeat_kv(k_cache_cpu, self.num_key_value_groups)
             v_cache_cpu = repeat_kv(v_cache_cpu, self.num_key_value_groups)
-            v_cpu,s_cpu = mha_logSum(q_cpu,k_cache_cpu,v_cache_cpu,attention_mask_q_cpu)
+            v_cpu,s_cpu = self.mha_lse(q_cpu,k_cache_cpu,v_cache_cpu,attention_mask_q_cpu)
         
          
         
@@ -156,7 +156,7 @@ def modified_llama_attention_forward(
         v_cache_gpu = repeat_kv(v_cache_gpu, self.num_key_value_groups)
         
        
-        v_gpu,s_gpu = mha_logSum(q_states,k_cache_gpu,v_cache_gpu,attention_mask_q)
+        v_gpu,s_gpu = self.mha_lse(q_states,k_cache_gpu,v_cache_gpu,attention_mask_q)
          
         
         #####################
@@ -197,26 +197,7 @@ def modified_llama_attention_forward(
         attn_output = torch.matmul(attn_weights, v_cache_gpu)
         
  
-    # # ##### remove later ######----
-    # if k_cache_cpu is not None:   
-        
-
-        
-    #     k_cache_gpu = torch.cat([k_cache_gpu[:,:,:start_size,:],k_cache_cpu[:,:,:kv_seq_len-q_len,:].cuda(),k_cache_gpu[:,:,start_size:,:]],dim=2)
-    #     v_cache_gpu = torch.cat([v_cache_gpu[:,:,:start_size,:],v_cache_cpu[:,:,:kv_seq_len-q_len,:].cuda(),v_cache_gpu[:,:,start_size:,:]],dim=2)
-
-    #     attention_mask_q_ = attention_mask  if q_len!=1 else None 
-    #     # attn_output_our,_ = mha_logSum(q_states,k_cache_gpu,v_cache_gpu,attention_mask_q_)
-    #     attn_output_our = normal_mha(q_states,k_cache_gpu,v_cache_gpu,attention_mask_q_)
-        
-    
-    #     attn_output_our = attn_output_our.reshape(-1, batch_size, self.num_heads,self.head_dim).permute(1,0,2,3)
-    #     acc = check_eq(attn_output_our,attn_output)  
-    #     print(f"layer {self.attn_layer_idx},accuracy {acc*100:.4}%, ")
-    #     # assert acc>0.9, f"{acc} invalid"
-            
-            
-    # # #### remove later ######----  
+     
         
 
     kv_cache_2add = (k_states, v_states) if use_cache else None
@@ -250,7 +231,7 @@ def modify_llama_attention(model,KVCache_manager):
     KVCache_manager.copy_stream = copy_stream
     rotary_emb_cpu = LlamaRotaryEmbedding(head_dim,device='cpu')
     merge_state    = merge_state_(config.num_attention_heads)
-   
+    mha_lse        = mha_lse_methods('llama',head_dim)
  
     def replace_layer(model):
         for name, module in reversed(model._modules.items()):
@@ -262,6 +243,7 @@ def modify_llama_attention(model,KVCache_manager):
                 model._modules[name].attn_layer_idx  = layer_idx
                 model._modules[name].rotary_emb_cpu  = rotary_emb_cpu
                 model._modules[name].merge_state  = merge_state
+                model._modules[name].mha_lse  = mha_lse
                 model._modules[name].KVCache_manager = KVCache_manager
                 model._modules[name].cpu_stream = cpu_stream
                 model._modules[name].forward = types.MethodType( modified_llama_attention_forward, model._modules[name])

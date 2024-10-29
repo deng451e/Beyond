@@ -3,49 +3,55 @@ import flashinfer
 import argparse
 import time 
 from beyond.utils import *
-import torch.nn as nn 
-from transformers.models.llama.modeling_llama import LlamaRotaryEmbedding,rotate_half,_make_causal_mask
+ 
+ 
 import logging 
 
 logger = logging.getLogger(__name__)
 
-def mha_logSum( q,k,v,attention_mask=None):
+ 
+ 
             
+ 
+ 
+
+ 
+# logSum attention methods 
+class mha_lse_methods:
+    def __init__(self,methods,head_dim):
+        self.methods = methods
+        self.scaling = head_dim ** -0.5
+    def __call__(self, q,k,v,attention_mask=None):
         
         #shape: b,h,s,d
-        batch_size = q.size(0)
-        num_heads  = q.size(1)
-        qs         = q.size(2)
-        head_dim   = q.size(3)
-        
-        scaling = head_dim ** -0.5
+        batch_size,num_heads,qs,head_dim = q.size()
          
-        
-        q = q.reshape(batch_size  * num_heads, -1,  head_dim)* scaling # bh,qs,d
+         
+        q = q.reshape(batch_size  * num_heads, -1,  head_dim)*self.scaling  # bh,qs,d
         k = k.permute(0,1,3,2).reshape(batch_size  * num_heads, head_dim, -1) # bh,d,s
         v = v.reshape(batch_size  * num_heads, -1, head_dim) # bh,s,d
         attn_weights = torch.bmm(q,k)   # bh,qs,s 
-       
-        
-        if attention_mask is not None: 
-            # logger.info(attention_mask)
-            # logger.info(attention_mask.shape)
-            # logger.info('---------------------------------')
-            attn_weights[:,:,-qs:] = attn_weights[:,:,-qs:] + attention_mask # bh,qs,s 
-        
-        
-         
+
+
+    
+        # model attention differs by masking mechanism
+        if attention_mask is not None:
+            match self.methods:
+
+                case "llama":
+                    attn_weights[:,:,-qs:] = attn_weights[:,:,-qs:] + attention_mask # bh,qs,s 
+                case "gpt-neox":
+                    mask_value = torch.finfo(attn_weights.dtype).min
+                    mask_value = torch.tensor(mask_value, dtype=attn_weights.dtype).to( attn_weights.device)
+                    attn_weights[:,:,-qs:] = torch.where(attention_mask, attn_weights[:,:,-qs:], mask_value)
+   
 
         max_scores, _ = attn_weights.max(dim=-1, keepdim=True) 
         exp_scores = torch.exp(attn_weights - max_scores) 
-
-
-       
-
         sum_exp_scores = exp_scores.sum(dim=-1, keepdim=True)
         log_sum = (torch.log(sum_exp_scores)  + max_scores) * torch.tensor(1.4427) 
         attn_weights = exp_scores / sum_exp_scores 
-       
+        attn_weights = attn_weights.to(v.dtype)
         value  = torch.bmm(attn_weights, v).permute(1,0,2).half().contiguous()
         log_sum = log_sum.squeeze(-1).permute(1,0).contiguous().float() 
         
@@ -53,40 +59,7 @@ def mha_logSum( q,k,v,attention_mask=None):
         if check_tensor_device(q,'cpu'):  return  value.pin_memory(),log_sum.pin_memory()
         if check_tensor_device(q,'cuda'): return  value, log_sum
             
-            
-             
- 
-
-def normal_mha(q,k,v,attention_mask=None):
-    # b h s d 
-    qs = q.size(-2)
-    attn_weights = torch.matmul(q, k.transpose(2, 3))  * (q.size(-1) ** -0.5)
-  
-    if attention_mask is not None: 
-            attn_weights[:,:,-qs:,:] = attn_weights[:,:,-qs:,:] + attention_mask.to(attn_weights.device) # bh,qs,s 
-        
-    max_scores, _ = attn_weights.max(dim=-1, keepdim=True) 
-    attn_weights = attn_weights - max_scores
-
-    attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(q.dtype)
-    attn_output = torch.matmul(attn_weights, v)
     
-    return  attn_output.transpose(1, 2).contiguous() 
-
- 
-
-
-def apply_rotary_pos_emb_single(x, cos, sin, position_ids):
-     
-    # The first two dimensions of cos and sin are always 1, so we can `squeeze` them.
-    cos = cos.squeeze(1).squeeze(0)  # [seq_len, dim]
-    sin = sin.squeeze(1).squeeze(0)  # [seq_len, dim]
-    cos = cos[position_ids].unsqueeze(1)  # [bs, 1, seq_len, dim]
-    sin = sin[position_ids].unsqueeze(1)  # [bs, 1, seq_len, dim]
-    x_embed = (x * cos) + (rotate_half(x) * sin)
-    return x_embed
-
- 
 
  
 #wrapper for flashinfer merge state functions 
@@ -153,56 +126,67 @@ class merge_state_:
 
 
 
+#####################
+#      For Test     # 
+#####################
+
+ 
+
+ 
+ 
+
+
 
 
 
 def test_correctness(args,log):
     log = add_info(args,log)
-    arch_name = args.arch_name
-    if arch_name == "opt-1.3b":
-    
-        num_heads=32; hidden_size=2048  
-
-    elif arch_name == "opt-2.7b":
-    
-        num_heads=32; hidden_size=2560  
-        
-    elif arch_name == "opt-6.7b":
-
-        num_heads=32; hidden_size=4096  
-
-    elif arch_name == "opt-13b":
-
-        num_heads=40; hidden_size=5120
-     
+    batch_size = args.batch_size
+    hidden_size = args.hidden_size
+    num_heads = args.num_heads
     start  = args.start_size
     recent = args.recent_size
     seq_len = args.seq_len
-    head_dim = hidden_size//num_heads
-    ratio = args.ratio
-    partial_len = int( seq_len*ratio )
-    batch_size = args.batch_size
     q_len = args.q_len
-    print(f"batch_size:{batch_size}")
+    head_dim = hidden_size//num_heads
      
-    
-    assert  (partial_len>0),  f"Partial length can't be 0 ..."
+   
+    assert  (start+recent<seq_len),  f"start+recent greater than seq_len..."
      
+    k_dim   =  2
     k_cache = torch.randn(batch_size,num_heads,seq_len,head_dim, device='cpu').half()
     v_cache = torch.randn(batch_size,num_heads,seq_len,head_dim, device='cpu').half()
     q       = torch.randn(batch_size,num_heads,q_len,head_dim, device='cuda:0').half()
-    merge_state = merge_state_(num_heads)
+    
      
-    k_dim   =  2
+     
     slice = DIM_TO_SLICE[k_dim]
-    rotary_emb = LlamaRotaryEmbedding(head_dim)
-  
+    mha_lse = mha_lse_methods(args.model_type,head_dim)
+    merge_state = merge_state_(num_heads)
+
     if args.RoPE:
-         
-        cos, sin = rotary_emb(v_cache,seq_len)
-      
-        q_ref =  apply_rotary_pos_emb_single(q.cpu(), cos, sin, torch.arange(seq_len-q_len,seq_len).unsqueeze(0))
+        match args.model_type:
+            case 'llama':
+                
+                from transformers.models.llama.modeling_llama import LlamaRotaryEmbedding,rotate_half 
+                rotary_emb = LlamaRotaryEmbedding(head_dim)
+            case 'gpt-neox':
+
+                from transformers.models.gpt_neox.modeling_gpt_neox import GPTNeoXRotaryEmbedding,rotate_half
+                rotary_emb = GPTNeoXRotaryEmbedding(head_dim,2048)
+
+        def apply_rotary_pos_emb_single(x, cos, sin, position_ids):
+            
+            # The first two dimensions of cos and sin are always 1, so we can `squeeze` them.
+            cos = cos.squeeze(1).squeeze(0)  # [seq_len, dim]
+            sin = sin.squeeze(1).squeeze(0)  # [seq_len, dim]
+            cos = cos[position_ids].unsqueeze(1)  # [bs, 1, seq_len, dim]
+            sin = sin[position_ids].unsqueeze(1)  # [bs, 1, seq_len, dim]
+            x_embed = (x * cos) + (rotate_half(x) * sin)
+            return x_embed
  
+        cos, sin = rotary_emb(v_cache,seq_len)
+        q_ref =  apply_rotary_pos_emb_single(q.cpu(), cos, sin, torch.arange(seq_len-q_len,seq_len).unsqueeze(0))
         k_ref = apply_rotary_pos_emb_single(k_cache, cos, sin, torch.arange(seq_len).unsqueeze(0))
     else:
         q_ref = q
@@ -210,37 +194,28 @@ def test_correctness(args,log):
 
  
      
-
-    v_reference_nomal = normal_mha(q_ref.cpu() ,k_ref.cpu(),v_cache.cpu())  # b s h d 
-
-    # v_reference,_ = mha_logSum(q_ref.cpu() ,k_ref.cpu(),v_cache.cpu()) # s bh d
+   
+    v_reference_nomal,_ = mha_lse(q_ref.cpu() ,k_ref.cpu(),v_cache.cpu())  # b s h d 
+    v_reference_nomal = v_reference_nomal.reshape(-1,batch_size,num_heads,head_dim).permute(1,0,2,3)
+    
+    # v_reference,_ = mha_lse(q_ref.cpu() ,k_ref.cpu(),v_cache.cpu()) # s bh d
     # v_reference = v_reference.reshape(-1,batch_size,num_heads,head_dim).permute(1,0,2,3)
     # print(v_reference_nomal.shape,v_reference.shape)
      
-    
-
-     
-    
-
-
-
     q_cpu = q.cpu() 
     k_cpu = slice(k_cache,start,seq_len-recent) 
     v_cpu = slice(v_cache,start,seq_len-recent) 
     
     
     
-    if args.RoPE:
-         
-         
-         
+    if args.RoPE: 
         q_cpu =  apply_rotary_pos_emb_single(q_cpu, cos, sin, torch.arange(seq_len-q_len,seq_len).unsqueeze(0))
- 
         k_cpu = apply_rotary_pos_emb_single(k_cpu, cos, sin, torch.arange(start,seq_len-recent).unsqueeze(0))
      
+
     st = time.time()
-    va,sa = mha_logSum(q_cpu,k_cpu,v_cpu)
-    print(f"CPU attention length: {seq_len-start-recent}, attention time: {time.time()-st}, ")
+    va,sa = mha_lse(q_cpu,k_cpu,v_cpu)
+    print(f"CPU attention length: {seq_len-start-recent}, compute time: {time.time()-st}, ")
 
     
     q_gpu = q
@@ -248,19 +223,12 @@ def test_correctness(args,log):
     v_gpu = torch.cat([slice(v_cache,0,start),slice(v_cache,seq_len-recent,seq_len)],dim=k_dim )
 
     if args.RoPE:
- 
         q_gpu = q_cpu.cuda()
         k_gpu = apply_rotary_pos_emb_single(k_gpu, cos, sin, torch.cat([torch.arange(0,start),torch.arange(seq_len-recent,seq_len)],dim=0 ).unsqueeze(0))
         
-        
-        
-
-       
- 
-     
     st = time.time() 
-    vb,sb = mha_logSum(q_gpu ,k_gpu.cuda(),v_gpu.cuda())
-    print(f"GPU attention length: {start+recent}, attention time: {time.time()-st}, ")
+    vb,sb = mha_lse(q_gpu ,k_gpu.cuda(),v_gpu.cuda())
+    print(f"GPU attention length: {start+recent}, compute + transfer time: {time.time()-st}, ")
 
     
     v_out,_ = merge_state( va,sa,vb,sb )
@@ -278,12 +246,14 @@ def test_correctness(args,log):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--arch_name", type=str, default="opt-13b")
-    parser.add_argument("--start_size", type=int, default=400)
-    parser.add_argument("--recent_size", type=int, default=1000) 
-    parser.add_argument("--seq_len", type=int, default=1500)
+    
+    parser.add_argument("--num_heads", type=int, default=32)
+    parser.add_argument("--hidden_size", type=int, default=4096)
+    parser.add_argument("--model_type", type=str, default="gpt-neox")
+    parser.add_argument("--start_size", type=int, default=4)
+    parser.add_argument("--recent_size", type=int, default=400) 
+    parser.add_argument("--seq_len", type=int, default=1000)
     parser.add_argument("--q_len", type=int, default=10)
-    parser.add_argument("--ratio", type=float, default=0.1)
     parser.add_argument("--repeat", type=int, default=10)
     parser.add_argument("--batch_size", type=int, default=5)
     parser.add_argument("--RoPE", type=bool, default=True )

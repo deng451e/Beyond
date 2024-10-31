@@ -235,14 +235,14 @@ class KVCache_manager_:
                     torch.cat(
                         [
                             k_cpu,
-                            self.k_slice(k2add, 0 , add_len - self.recent_sizes[idx]),
+                            self.k_slice(k2add, 0 , add_len - self.recent_sizes[idx]).to('cpu', non_blocking=True),
                         ],
                         dim=self.k_seq_dim,
                     ),
                     torch.cat(
                         [
                             v_cpu,
-                            self.v_slice(v2add, 0 , add_len - self.recent_sizes[idx]),
+                            self.v_slice(v2add, 0 , add_len - self.recent_sizes[idx]).to('cpu', non_blocking=True),
                         ],
                         dim=self.v_seq_dim,
                     ),

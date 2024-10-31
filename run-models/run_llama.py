@@ -118,7 +118,7 @@ def main(args):
         config = model.config 
         KVCache_manager = KVCache_manager_(
             start_size=4,
-            recent_size=50,
+            recent_size=40,
             k_seq_dim=2,
             v_seq_dim=2,
             head_dim=config.hidden_size//config.num_attention_heads,

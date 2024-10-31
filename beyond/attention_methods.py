@@ -26,13 +26,12 @@ class mha_lse_methods:
         #shape: b,h,s,d
         batch_size,num_heads,qs,head_dim = q.size()
          
-         
         q = q.reshape(batch_size  * num_heads, -1,  head_dim)   # bh,qs,d
         k = k.permute(0,1,3,2).reshape(batch_size  * num_heads, head_dim, -1) # bh,d,s
         v = v.reshape(batch_size  * num_heads, -1, head_dim) # bh,s,d
         attn_weights = torch.bmm(q,k)   # bh,qs,s 
 
-
+        
         max_scores, _ = attn_weights.max(dim=-1, keepdim=True) 
         attn_weights  = attn_weights - max_scores
         # model attention differs by masking mechanism
@@ -62,7 +61,7 @@ class mha_lse_methods:
         value  = torch.bmm(attn_weights, v).permute(1,0,2).half().contiguous()
         log_sum = log_sum.squeeze(-1).permute(1,0).contiguous().float() 
         
-        
+       
         if check_tensor_device(q,'cpu'):  return  value.pin_memory(),log_sum.pin_memory()
         if check_tensor_device(q,'cuda'): return  value, log_sum
             
@@ -76,21 +75,22 @@ class merge_state_:
         self.in_place = in_place
          
     def __call__(self, va,sa,vb,sb):
-       
+        """
+        Input shape: s,h,d or s,bh,d
+        """
         assert check_tensor_device(va,'cpu') , f"va should be on CPU"
         assert check_tensor_device(sa,'cpu') , f"sa should be on CPU"
         assert check_tensor_device(vb,'cuda') , f"vb should be on GPU"
         assert check_tensor_device(sb,'cuda') , f"sb should be on GPU"
         assert va.is_pinned() and va.is_contiguous(), f"va should be on pinned and contiguous"
         assert sa.is_pinned() and va.is_contiguous(), f"sa should be on pinned and contiguous"
-
-         
+ 
         head_dim = va.size(-1)
         
-    
+        
         """
         The maximum compute capability of the NVIDIA GPU is 1024 threads per block. 
-        Therefore, we partition the head and batch dimensions accordingly.
+        Therefore, we partition the batch&head dimension accordingly.
         """
         partitions_dim = 7680//head_dim
         if partitions_dim<va.size(-2):
@@ -154,20 +154,22 @@ def test_correctness(args,log):
     head_dim = hidden_size//num_heads
      
    
-    assert  (start+recent<seq_len),  f"start+recent greater than seq_len..."
+    assert  (start+recent<=seq_len),  f"start+recent greater than seq_len..."
      
     k_dim   =  2
     k_cache = torch.randn(batch_size,num_heads,seq_len,head_dim, device='cpu').half()
     v_cache = torch.randn(batch_size,num_heads,seq_len,head_dim, device='cpu').half()
     q       = torch.randn(batch_size,num_heads,q_len,head_dim, device='cuda:0').half() 
+    k       = torch.randn(batch_size,num_heads,q_len,head_dim, device='cuda:0').half() 
+    v       = torch.randn(batch_size,num_heads,q_len,head_dim, device='cuda:0').half() 
     
      
-     
+   
     slice = DIM_TO_SLICE[k_dim]
     mha_lse = mha_lse_methods(args.model_type)
     merge_state = merge_state_(num_heads)
-
-     
+    kv_len =  seq_len + q_len
+   
     match args.model_type:
         case 'llama':
             
@@ -180,6 +182,14 @@ def test_correctness(args,log):
         case 'opt':
             args.RoPE = False 
 
+
+    #####################
+    # Normal Attention  # 
+    #####################
+
+    q_ref = q
+    k_ref = torch.cat([k_cache,k.cpu()],dim=k_dim)
+    v_ref = torch.cat([v_cache,v.cpu()],dim=k_dim)
     if args.RoPE:
         def apply_rotary_pos_emb_single(x, cos, sin, position_ids):
             
@@ -191,42 +201,46 @@ def test_correctness(args,log):
             x_embed = (x * cos) + (rotate_half(x) * sin)
             return x_embed
  
-        cos, sin = rotary_emb(v_cache,seq_len)
-        q_ref =  apply_rotary_pos_emb_single(q.cpu(), cos, sin, torch.arange(seq_len-q_len,seq_len).unsqueeze(0))
-        k_ref = apply_rotary_pos_emb_single(k_cache, cos, sin, torch.arange(seq_len).unsqueeze(0))
-    else:
-        q_ref = q
-        k_ref = k_cache
-
- 
-     
-   
-    v_reference_nomal,_ = mha_lse(q_ref.cpu() ,k_ref.cpu(),v_cache.cpu())  # b s h d 
+        cos, sin = rotary_emb(v_cache,kv_len)
+       
+        q_ref =  apply_rotary_pos_emb_single(q_ref.cpu(), cos, sin, torch.arange(kv_len-q_len,kv_len).unsqueeze(0))
+        k_ref = apply_rotary_pos_emb_single(k_ref, cos, sin, torch.arange(kv_len).unsqueeze(0))
+    
+          
+    v_reference_nomal,_ = mha_lse(q_ref.cpu() ,k_ref.cpu(),v_ref.cpu())  # b s h d 
     v_reference_nomal = v_reference_nomal.reshape(-1,batch_size,num_heads,head_dim).permute(1,0,2,3)
      
-    q_cpu = q.cpu() 
-    k_cpu = slice(k_cache,start,seq_len-recent) 
-    v_cpu = slice(v_cache,start,seq_len-recent) 
-    
-    
-    
-    if args.RoPE: 
-        q_cpu =  apply_rotary_pos_emb_single(q_cpu, cos, sin, torch.arange(seq_len-q_len,seq_len).unsqueeze(0))
-        k_cpu = apply_rotary_pos_emb_single(k_cpu, cos, sin, torch.arange(start,seq_len-recent).unsqueeze(0))
-     
 
+    #####################
+    #   CPU Attention   # 
+    #####################
+    q_cpu = q.cpu() 
+    k_cpu = torch.cat([slice(k_cache,start,seq_len-recent),k.cpu()],dim=k_dim)
+    v_cpu = torch.cat([slice(v_cache,start,seq_len-recent),v.cpu()],dim=k_dim)
+     
+    if args.RoPE: 
+        q_cpu = apply_rotary_pos_emb_single(q_cpu, cos, sin, torch.arange(kv_len-q_len,kv_len).unsqueeze(0))
+        position_ids = torch.cat([  
+                torch.arange(start, seq_len-recent, device='cpu'),
+                torch.arange(kv_len-q_len, kv_len, device='cpu')
+                ],dim=0).unsqueeze(0)
+        k_cpu = apply_rotary_pos_emb_single(k_cpu, cos, sin,position_ids)
+     
+    print(log)
     st = time.time()
     va,sa = mha_lse(q_cpu,k_cpu,v_cpu)
     print(f"CPU attention length: {seq_len-start-recent}, compute time: {time.time()-st}, ")
 
-    
+    #####################
+    #   GPU Attention   # 
+    #####################
     q_gpu = q
-    k_gpu = torch.cat([slice(k_cache,0,start),slice(k_cache,seq_len-recent,seq_len)],dim=k_dim )
-    v_gpu = torch.cat([slice(v_cache,0,start),slice(v_cache,seq_len-recent,seq_len)],dim=k_dim )
+    k_gpu = torch.cat([slice(k_cache,0,start),slice(k_cache,seq_len-recent,seq_len),k.cpu()],dim=k_dim )
+    v_gpu = torch.cat([slice(v_cache,0,start),slice(v_cache,seq_len-recent,seq_len),v.cpu()] ,dim=k_dim )
 
     if args.RoPE:
         q_gpu = q_cpu.cuda()
-        k_gpu = apply_rotary_pos_emb_single(k_gpu, cos, sin, torch.cat([torch.arange(0,start),torch.arange(seq_len-recent,seq_len)],dim=0 ).unsqueeze(0))
+        k_gpu = apply_rotary_pos_emb_single(k_gpu, cos, sin, torch.cat([torch.arange(0,start),torch.arange(seq_len-recent,kv_len)],dim=0 ).unsqueeze(0))
         
     st = time.time() 
     vb,sb = mha_lse(q_gpu ,k_gpu.cuda(),v_gpu.cuda())
@@ -256,8 +270,8 @@ if __name__ == "__main__":
     parser.add_argument("--q_len", type=int, default=1)
 
     # model config 
-    parser.add_argument("--num_heads", type=int, default=32)
-    parser.add_argument("--hidden_size", type=int, default=4096)
+    parser.add_argument("--num_heads", type=int, default=40)
+    parser.add_argument("--hidden_size", type=int, default=5120)
     parser.add_argument("--model_type", type=str, default="opt")
     parser.add_argument("--RoPE", type=bool, default=True )
     

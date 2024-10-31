@@ -60,7 +60,7 @@ def modified_llama_attention_forward(
     v_states = self.v_proj(hidden_states)
 
     # b,h,s,d
-    q_states = q_states.view(batch_size, q_len, self.num_heads, self.head_dim).transpose(1, 2)
+    q_states = q_states.view(batch_size, q_len, self.num_heads, self.head_dim).transpose(1, 2)/ math.sqrt(self.head_dim)
     k_states = k_states.view(batch_size, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
     v_states = v_states.view(batch_size, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
  
@@ -104,7 +104,6 @@ def modified_llama_attention_forward(
     
     cos_gpu, sin_gpu = self.rotary_emb(v_states, seq_len=kv_seq_len)
     q_position_ids = torch.arange(kv_seq_len-q_len,kv_seq_len,device=q_states.device).unsqueeze(0)
-    
     q_states = apply_rotary_pos_emb_single(q_states, cos_gpu, sin_gpu, q_position_ids)
     
      # Mix CPU&GPU attention
@@ -182,7 +181,7 @@ def modified_llama_attention_forward(
       
         
         # subtract maximum value to improve numerical stability
-        attn_weights = torch.matmul(q_states, k_cache_gpu.transpose(2, 3)) /  math.sqrt(self.head_dim)
+        attn_weights = torch.matmul(q_states, k_cache_gpu.transpose(2, 3))  
         max_scores, _ = attn_weights.max(dim=-1, keepdim=True) 
         attn_weights = attn_weights - max_scores
 
@@ -195,7 +194,7 @@ def modified_llama_attention_forward(
         attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float16).to(q_states.dtype)
         
         attn_output = torch.matmul(attn_weights, v_cache_gpu)
-        
+        attn_output = attn_output.transpose(1, 2).contiguous()
  
      
         
@@ -205,7 +204,7 @@ def modified_llama_attention_forward(
     self.KVCache_manager.add_kv_cache_by_layer(self.attn_layer_idx, kv_cache_2add)
      
      
-    attn_output = attn_output.transpose(1, 2).contiguous()
+     
     attn_output = attn_output.reshape(batch_size, q_len, self.hidden_size)
      
     attn_output = self.o_proj(attn_output)
@@ -231,7 +230,7 @@ def modify_llama_attention(model,KVCache_manager):
     KVCache_manager.copy_stream = copy_stream
     rotary_emb_cpu = LlamaRotaryEmbedding(head_dim,device='cpu')
     merge_state    = merge_state_(config.num_attention_heads)
-    mha_lse        = mha_lse_methods('llama',head_dim)
+    mha_lse        = mha_lse_methods('llama')
  
     def replace_layer(model):
         for name, module in reversed(model._modules.items()):

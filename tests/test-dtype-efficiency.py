@@ -2,12 +2,10 @@ import torch
 import time 
 import argparse
 import numpy as np 
-from utils import * 
+from beyond.utils import * 
 def main(args,log):
    
-     
-    
-    
+      
     for power in range(1,13):
         dim = 2**power
         x = torch.randn(dim,dim,dtype= torch.float16) 

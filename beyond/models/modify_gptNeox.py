@@ -116,6 +116,7 @@ def modified_GPTNeoX_attention_forward(
 
   
     if k_cache_cpu is not None:
+        q = q * self.norm_factor
         if kv_seq_len > self.bias.shape[-1]:
             self._init_bias(kv_seq_len, device=k.device)
         attention_mask = self.bias[:, :, kv_seq_len - q_len : kv_seq_len, :kv_seq_len]
@@ -228,7 +229,7 @@ def modify_GPTNeoX_attention(model,KVCache_manager):
                     max_position_embeddings=config.max_position_embeddings,
                     device='cpu')
     merge_state = merge_state_(config.num_attention_heads)
-    mha_lse     = mha_lse_methods('gpt-neox',head_dim)
+    mha_lse     = mha_lse_methods('gpt-neox')
     
  
     def replace_layer(model):

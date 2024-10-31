@@ -10,9 +10,12 @@ import os.path as osp
  
 
 def add_info(args,log):
+    idx = 1 
     for arg, value in vars(args).items():
         log += f"{arg}:{value}, "
-    
+        if idx%4==0: log += "\n"
+        idx +=1 
+    log += "\n=========================="
     return log 
 
 def check_workspace(ratio):

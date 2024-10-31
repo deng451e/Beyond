@@ -23,6 +23,7 @@ os.environ["CUDA_LAUNCH_BLOCKING"] = "0"
 
 @torch.no_grad()
 def greedy_generate(model, tokenizer, input_ids, past_key_values,KVCache_manager, max_gen_len,enable_modify):
+    
     outputs = model(
         input_ids=input_ids,
         past_key_values=past_key_values,
@@ -32,8 +33,9 @@ def greedy_generate(model, tokenizer, input_ids, past_key_values,KVCache_manager
     pred_token_idx = outputs.logits[:, -1, :].argmax(dim=-1).unsqueeze(1)
     generated_ids = [pred_token_idx.item()]
     pos = 0
-   
-        
+    if enable_modify:
+          
+        KVCache_manager.copy_stream.synchronize()
     for _ in range(max_gen_len - 1):
         outputs = model(
             input_ids=pred_token_idx,
@@ -42,11 +44,11 @@ def greedy_generate(model, tokenizer, input_ids, past_key_values,KVCache_manager
         )
         if enable_modify:
             past_key_values = None 
-             
+            KVCache_manager.copy_stream.synchronize()
 
         else:
             past_key_values = outputs.past_key_values
-             
+            
          
              
         pred_token_idx = outputs.logits[:, -1, :].argmax(dim=-1).unsqueeze(1)
@@ -71,7 +73,7 @@ def greedy_generate(model, tokenizer, input_ids, past_key_values,KVCache_manager
         if pred_token_idx == tokenizer.eos_token_id:
           
             break
-     
+    
     print(" ".join(generated_text[pos:]), flush=True)
     return past_key_values
 
@@ -80,10 +82,10 @@ def greedy_generate(model, tokenizer, input_ids, past_key_values,KVCache_manager
 def inference(model, tokenizer, prompts, KVCache_manager=None, max_gen_len=1000,enable_modify=False):
     past_key_values = None
   
-    for idx, prompt in enumerate(prompts):
-        
-        prompt = "USER: " + prompt 
-        print("\n" + prompt, end="")
+    for idx, prompt in enumerate(prompts): 
+        prompt = "USER: "  + prompt  +  "\n\nrephrasing:"
+       
+        print(prompt, end="")
         input_ids = tokenizer(prompt, return_tensors="pt").input_ids
         logger.info(f"================================")
         logger.info(f"Index {idx}: {input_ids.size(1)}")
@@ -117,7 +119,7 @@ def main(args):
         config = model.config 
         KVCache_manager = KVCache_manager_(
             start_size=4,
-            recent_size=50,
+            recent_size=20,
             k_seq_dim=2,
             v_seq_dim=2,
             head_dim=config.hidden_size//config.num_attention_heads,
@@ -154,8 +156,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--config_file_path", type=str, default="kv_manager_InitConfig/opt-13b.json")
     parser.add_argument("--model_name_or_path", type=str, default="facebook/opt-13b")
-    parser.add_argument("--data_root", type=str, default="data/mt_bench.jsonl")
-    
+    parser.add_argument("--data_root", type=str, default="facebook/content_rephrasing")
+      
+    # parser.add_argument("--data_root", type=str, default="data/mt_bench.jsonl")
     parser.add_argument("--enable_modify", action="store_true")
     args = parser.parse_args()
     main(args)

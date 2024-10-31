@@ -126,7 +126,7 @@ def load_dataset_(dataset_path,cnt=100):
                 cnt -= 1 
                 if cnt==0:
                     break
-        case "facebook/Multi-IF":
+        case "facebook/content_rephrasing":
             list_data = load_dataset(dataset_path)['train']
             # truncate datset size           
             
@@ -134,9 +134,8 @@ def load_dataset_(dataset_path,cnt=100):
                
              
             
-                prompts += [ sample['turn_1_prompt'].split(":")[2][2:-2]]
-                prompts += [ sample['turn_2_prompt'].split(":")[2][2:-2]]
-                prompts += [ sample['turn_3_prompt'].split(":")[2][2:-2]]
+                prompts += [ sample['Input']]
+               
                  
                 
                 cnt -= 1 

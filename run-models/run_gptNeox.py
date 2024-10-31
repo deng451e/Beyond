@@ -35,7 +35,7 @@ def greedy_generate(model, tokenizer, input_ids, past_key_values,KVCache_manager
     generated_ids = [pred_token_idx.item()]
     pos = 0
    
-        
+    
     for _ in range(max_gen_len - 1):
         outputs = model(
             input_ids=pred_token_idx,
@@ -73,7 +73,7 @@ def greedy_generate(model, tokenizer, input_ids, past_key_values,KVCache_manager
         if pred_token_idx == tokenizer.eos_token_id:
           
             break
-     
+    
     print(" ".join(generated_text[pos:]), flush=True)
     return past_key_values
 
@@ -160,6 +160,7 @@ if __name__ == "__main__":
     parser.add_argument("--config_file_path", type=str, default="kv_manager_InitConfig/lotus-12B.json")
     parser.add_argument("--model_name_or_path", type=str, default="hakurei/lotus-12B")
     parser.add_argument("--data_root", type=str, default="hakurei/open-instruct-v1")
+    
     parser.add_argument("--enable_modify", action="store_true")
     args = parser.parse_args()
     main(args)

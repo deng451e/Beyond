@@ -18,40 +18,47 @@ logger = logging.getLogger(__name__)
  
 # logSum attention methods 
 class mha_lse_methods:
-    def __init__(self,methods,head_dim):
+    def __init__(self,methods ):
         self.methods = methods
-        self.scaling = head_dim ** -0.5
+        
     def __call__(self, q,k,v,attention_mask=None):
         
         #shape: b,h,s,d
         batch_size,num_heads,qs,head_dim = q.size()
          
          
-        q = q.reshape(batch_size  * num_heads, -1,  head_dim)*self.scaling  # bh,qs,d
+        q = q.reshape(batch_size  * num_heads, -1,  head_dim)   # bh,qs,d
         k = k.permute(0,1,3,2).reshape(batch_size  * num_heads, head_dim, -1) # bh,d,s
         v = v.reshape(batch_size  * num_heads, -1, head_dim) # bh,s,d
         attn_weights = torch.bmm(q,k)   # bh,qs,s 
 
 
-    
+        max_scores, _ = attn_weights.max(dim=-1, keepdim=True) 
+        attn_weights  = attn_weights - max_scores
         # model attention differs by masking mechanism
         if attention_mask is not None:
             match self.methods:
 
                 case "llama":
                     attn_weights[:,:,-qs:] = attn_weights[:,:,-qs:] + attention_mask # bh,qs,s 
+
+                case "opt":
+                    
+                    attn_weights[:,:,-qs:] = attn_weights[:,:,-qs:] + attention_mask 
+                    attn_weights = torch.max(attn_weights, torch.tensor(torch.finfo(attn_weights.dtype).min, device=attn_weights.device))
+                    attn_weights = attn_weights.to(torch.float32)
                 case "gpt-neox":
                     mask_value = torch.finfo(attn_weights.dtype).min
                     mask_value = torch.tensor(mask_value, dtype=attn_weights.dtype).to( attn_weights.device)
                     attn_weights[:,:,-qs:] = torch.where(attention_mask, attn_weights[:,:,-qs:], mask_value)
    
 
-        max_scores, _ = attn_weights.max(dim=-1, keepdim=True) 
-        exp_scores = torch.exp(attn_weights - max_scores) 
+         
+        exp_scores = torch.exp(attn_weights).to(v.dtype)
         sum_exp_scores = exp_scores.sum(dim=-1, keepdim=True)
         log_sum = (torch.log(sum_exp_scores)  + max_scores) * torch.tensor(1.4427) 
         attn_weights = exp_scores / sum_exp_scores 
-        attn_weights = attn_weights.to(v.dtype)
+        #attn_weights = attn_weights.to(v.dtype)
         value  = torch.bmm(attn_weights, v).permute(1,0,2).half().contiguous()
         log_sum = log_sum.squeeze(-1).permute(1,0).contiguous().float() 
         
@@ -152,25 +159,28 @@ def test_correctness(args,log):
     k_dim   =  2
     k_cache = torch.randn(batch_size,num_heads,seq_len,head_dim, device='cpu').half()
     v_cache = torch.randn(batch_size,num_heads,seq_len,head_dim, device='cpu').half()
-    q       = torch.randn(batch_size,num_heads,q_len,head_dim, device='cuda:0').half()
+    q       = torch.randn(batch_size,num_heads,q_len,head_dim, device='cuda:0').half() 
     
      
      
     slice = DIM_TO_SLICE[k_dim]
-    mha_lse = mha_lse_methods(args.model_type,head_dim)
+    mha_lse = mha_lse_methods(args.model_type)
     merge_state = merge_state_(num_heads)
 
+     
+    match args.model_type:
+        case 'llama':
+            
+            from transformers.models.llama.modeling_llama import LlamaRotaryEmbedding,rotate_half 
+            rotary_emb = LlamaRotaryEmbedding(head_dim)
+        case 'gpt-neox':
+
+            from transformers.models.gpt_neox.modeling_gpt_neox import GPTNeoXRotaryEmbedding,rotate_half
+            rotary_emb = GPTNeoXRotaryEmbedding(head_dim,2048)
+        case 'opt':
+            args.RoPE = False 
+
     if args.RoPE:
-        match args.model_type:
-            case 'llama':
-                
-                from transformers.models.llama.modeling_llama import LlamaRotaryEmbedding,rotate_half 
-                rotary_emb = LlamaRotaryEmbedding(head_dim)
-            case 'gpt-neox':
-
-                from transformers.models.gpt_neox.modeling_gpt_neox import GPTNeoXRotaryEmbedding,rotate_half
-                rotary_emb = GPTNeoXRotaryEmbedding(head_dim,2048)
-
         def apply_rotary_pos_emb_single(x, cos, sin, position_ids):
             
             # The first two dimensions of cos and sin are always 1, so we can `squeeze` them.
@@ -242,13 +252,13 @@ if __name__ == "__main__":
     
     parser.add_argument("--start_size", type=int, default=4)
     parser.add_argument("--recent_size", type=int, default=50) 
-    parser.add_argument("--seq_len", type=int, default=78)
-    parser.add_argument("--q_len", type=int, default=10)
+    parser.add_argument("--seq_len", type=int, default=55)
+    parser.add_argument("--q_len", type=int, default=1)
 
     # model config 
     parser.add_argument("--num_heads", type=int, default=32)
     parser.add_argument("--hidden_size", type=int, default=4096)
-    parser.add_argument("--model_type", type=str, default="gpt-neox")
+    parser.add_argument("--model_type", type=str, default="opt")
     parser.add_argument("--RoPE", type=bool, default=True )
     
     # test config 

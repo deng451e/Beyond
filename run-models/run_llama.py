@@ -118,7 +118,7 @@ def main(args):
         config = model.config 
         KVCache_manager = KVCache_manager_(
             start_size=4,
-            recent_size=1000,
+            recent_size=50,
             k_seq_dim=2,
             v_seq_dim=2,
             head_dim=config.hidden_size//config.num_attention_heads,
@@ -130,9 +130,9 @@ def main(args):
         )
 
     
-        if args.config_file_path:
-            print(f"Loading KV manager from {args.config_file_path} ...")
-            KVCache_manager = set_kv_manager_config(KVCache_manager,args.config_file_path)
+        # if args.config_file_path:
+        #     print(f"Loading KV manager from {args.config_file_path} ...")
+        #     KVCache_manager = set_kv_manager_config(KVCache_manager,args.config_file_path)
  
         KVCache_manager.print_coverage()
 
@@ -155,7 +155,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--config_file_path", type=str, default="kv_manager_InitConfig/llama-vicuna-13b-v1.3.json")
     parser.add_argument("--model_name_or_path", type=str, default="lmsys/vicuna-13b-v1.3")
-    parser.add_argument("--data_root", type=str, default="hakurei/open-instruct-v1")
+    # parser.add_argument("--data_root", type=str, default="hakurei/open-instruct-v1")
+    parser.add_argument("--data_root", type=str, default="data/mt_bench.jsonl")
     parser.add_argument("--enable_modify", action="store_true")
     args = parser.parse_args()
     main(args)

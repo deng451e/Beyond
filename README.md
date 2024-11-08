@@ -1,6 +1,9 @@
 ##  Attention Beyond the scope of GPU memory for LLMs inference 
 
-we propose Beyond, a hybrid CPU-GPU attention method that seamlessly integrates into LLMs to enhance inference speed without requiring additional fine-tuning. Beyond supports unlimited-length context inference while maintaining performance stability and efficiency.  Beyond empirically categorizes the KV cache into two groups based on past attention score. The GPU performs dense attention on groups with frequent high scores, while the CPU processes sparse attention for the remaining groups. The resulting attention states are merged on the GPU, minimizing data transfer requirements and enabling a larger attention window. Code is available at https://github.com/deng451e/Beyond
+
+![schemes](figures/comparison.png)
+
+we propose Beyond, a hybrid CPU-GPU attention method that seamlessly integrates into LLMs to enhance inference speed without requiring additional fine-tuning. Beyond supports unlimited-length context inference while maintaining performance stability and efficiency.  Beyond empirically categorizes the KV cache into two groups based on past attention score. The GPU performs dense attention on groups with frequent high scores, while the CPU processes sparse attention for the remaining groups. The resulting attention states are merged on the GPU, minimizing data transfer requirements and enabling a larger attention window.  
 
 ### Environment Setup
 

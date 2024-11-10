@@ -6,13 +6,17 @@ pip install cmake==3.30.4
 
 cd $PWD/3rparty/flashinfer/python
 pip install -e .
+echo "flashinfer installed"
 
 cd $PWD/3rparty/Infinigen/speedup
 pip install -e infinigen
 pip install -e flexgen
+echo "Infinigen installed"
 
 cd $PWD/3rparty/MoA
+git checkout 0.0.1
 pip install -e .
+echo "MoA installed"
 
 cd $PWD
 python setup.py develop

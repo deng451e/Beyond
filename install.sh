@@ -3,9 +3,16 @@ pip install transformers==4.33.0 accelerate datasets evaluate wandb scikit-learn
 pip install cmake==3.30.4
 pip install -r requirements.txt
 
-cd ./3rparty
-git clone git@github.com:deng451e/flashinfer.git --recursive
-cd flashinfer/python
+#
+cd $PWD/3rparty/flashinfer/python
 pip install -e .
-cd ../../../
+
+cd $PWD/3rparty/Infinigen/speedup
+pip install -e infinigen
+pip install -e flexgen
+
+cd $PWD/3rparty/MoA
+pip install -e .
+
+cd $PWD
 python setup.py develop

@@ -35,6 +35,7 @@ class mha_lse_methods:
         max_scores, _ = attn_weights.max(dim=-1, keepdim=True) 
         attn_weights  = attn_weights - max_scores
         # model attention differs by masking mechanism
+        
         if attention_mask is not None:
             match self.methods:
 
@@ -50,7 +51,10 @@ class mha_lse_methods:
                     mask_value = torch.finfo(attn_weights.dtype).min
                     mask_value = torch.tensor(mask_value, dtype=attn_weights.dtype).to( attn_weights.device)
                     attn_weights[:,:,-qs:] = torch.where(attention_mask, attn_weights[:,:,-qs:], mask_value)
-   
+                case "flexgen-opt":
+                    print(attention_mask.shape,attn_weights.shape)
+                     
+                    attn_weights = torch.where(attention_mask, attn_weights[:,:,-qs:], -1e4)
 
          
         exp_scores = torch.exp(attn_weights).to(v.dtype)
@@ -121,6 +125,7 @@ class merge_state_:
         
             
         s,d = v_out.size(0),v_out.size(2)
+        
         v_out = v_out.reshape(s,-1,self.num_heads,d).permute(1,0,2,3) # b,s,h,d
 
         # s_out shape: s,bh

@@ -294,8 +294,17 @@ class KVCache_manager_:
                      
         return 
   
-      
- 
+    def preload_layer_kv(self,idx,device='cuda'):
+        with torch.cuda.stream(self.copy_stream):
+            k_gpu,v_gpu,k_cpu,v_cpu = self.kv_cache[idx]
+            self.kv_cache[idx] = [k_gpu.to('cpu', non_blocking=True),v_gpu.to('cpu', non_blocking=True),k_cpu,v_cpu]
+            idx += 1 
+            idx = (idx+1)%(self.num_layers )
+            k_gpu,v_gpu,k_cpu,v_cpu = self.kv_cache[idx]
+            if k_gpu is not None:
+                self.kv_cache[idx] = [k_gpu.to(device, non_blocking=True),v_gpu.to(device, non_blocking=True),k_cpu,v_cpu]
+        return 
+        
     def print_kv_static(self,idx=None):
         def print_(idx):
             k_gpu,v_gpu,k_cpu,v_cpu = self.kv_cache[idx]
@@ -313,10 +322,10 @@ class KVCache_manager_:
 
     def print_coverage(self,idx=None):
         if idx is not None:
-            print(f"GPU coverage at Layer {idx}:{self.start_sizes[idx]}~{self.recent_sizes[idx]}")
+            print(f"Layer {idx}: start size:{self.start_sizes[idx]}, recent_size: {self.recent_sizes[idx]}")
         else:
             for idx in range( self.num_layers):
-                print(f"GPU coverage at Layer {idx}:{self.start_sizes[idx]}~{self.recent_sizes[idx]}")
+                print(f"Layer {idx}: start size:{self.start_sizes[idx]}, recent_size: {self.recent_sizes[idx]}")
 
         return 
 

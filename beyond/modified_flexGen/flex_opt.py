@@ -26,6 +26,7 @@ from flexgen.utils import (Task, ExecutionEnv, GB, T, ValueHolder,
     read_benchmark_log)
 
 import logging
+logger = logging.getLogger(__name__)
 ###########################
 from beyond.utils import *
 from beyond.loading import * 
@@ -345,18 +346,106 @@ class SelfAttention:
 
         cache = device.init_cache_one_gpu_batch(self.config, self.task, self.policy)
         cache_home.store(cache)
+    def load_cache(self, cache_home, cache_read_buf, i):
+        if i == 0:  # prefill, no cache
+            return
 
+        k_home, v_home = cache_home.val
+
+        # Pick code path
+        if self.policy.compress_cache:
+            path = 0
+            dst = self.attention_compute.compressed_device
+        else:
+            if self.policy.cpu_cache_compute:
+                if (k_home.device.device_type == DeviceType.MIXED and
+                    k_home.data[0][0] is not None):
+                    path = 2
+                else:
+                    path = 1
+            else:
+                path = 0
+            dst = self.attention_compute
+
+        if path == 0:  # Direct copy
+            # shape: (s, b * n_head, head_dim)
+            indices = (slice(0, self.task.prompt_len + i),
+                       slice(0, k_home.shape[1]))
+
+            if self.policy.attn_sparsity >= 1.0:
+                cache_read_buf.store((
+                    k_home.smart_copy(dst, indices),
+                    v_home.smart_copy(dst, indices),
+                ))
+            else:
+                cache_read_buf.store((
+                    k_home.smart_copy(dst, indices),
+                    (v_home, False),
+                ))
+        elif path == 1:  # Copy to CPU temporary workspace
+            # shape: (s, b * n_head, head_dim)
+            k_buf, v_buf = dst.next_attention_compute_workspace()
+            indices = (slice(0, self.task.prompt_len + i - 1),
+                       slice(0, k_home.shape[1]))
+            general_copy(k_buf, indices, k_home, indices)
+
+            if self.policy.attn_sparsity >= 1.0:
+                general_copy(v_buf, indices, v_home, indices)
+                cache_read_buf.store(((k_buf, False), (v_buf, False)))
+            else:
+                cache_read_buf.store(((k_buf, False), ((v_home, v_buf), False)))
+        elif path == 2:  # Copy to both GPU and CPU
+            # The caches are stored on both GPU and other devices.
+            # Compute attention on gpu for caches stored on gpu.
+            # Compute attention on cpu for caches stored on cpu/disk.
+            gpu_k_buf = k_home.data[0][0]
+            gpu_v_buf = v_home.data[0][0]
+
+            # shape: (s, b * n_head, head_dim)
+            k_buf, v_buf = dst.next_attention_compute_workspace()
+            indices = (slice(0, self.task.prompt_len + i - 1),
+                       slice(gpu_k_buf.shape[1], k_home.shape[1]))
+            general_copy(k_buf, indices, k_home, indices)
+            general_copy(v_buf, indices, v_home, indices)
+            cache_read_buf.store((((gpu_k_buf, k_buf,), False),
+                                  ((gpu_v_buf, v_buf,), False)))
+            assert self.policy.attn_sparsity >= 1.0
+        else:
+            raise ValueError(f"Invalid path: {path}")
+
+    def store_cache(self, cache_home, cache_write_buf, i):
+        # shape: (s, b * n_head, head_dim)
+        k_home, v_home = cache_home.val
+        k_new, v_new = cache_write_buf.pop()
+
+        if i == self.task.gen_len - 1:  # last token, no need to store cache
+            return
+
+        if i == 0:  # prefill
+            indices = (slice(0, k_new.shape[0]),
+                       slice(0, k_new.shape[1]))
+        else:  # decoding
+            pos = self.task.prompt_len + i
+            indices = (slice(pos - k_new.shape[0], pos),
+                       slice(0, k_new.shape[1]))
+
+        general_copy(k_home, indices, k_new, None)
+        general_copy(v_home, indices, v_new, None)
+
+    def input_act_shape_and_dtype(self, batch_size, seq_len):
+        return (batch_size, seq_len, self.config.input_dim), self.config.dtype
      
 
-    def forward(self, hidden, _, weight_read_buf, attention_mask, _, i, k):
+    def forward(self, hidden, cache_read_buf, weight_read_buf, attention_mask, cache_write_buf, i, k):
         n_head = self.config.n_head
 
         donate = [False] * 14
         h, donate[0] = hidden.val, True
         
         
-        k_cache_gpu,v_cache_gpu,k_cache_cpu,v_cache_cpu = self.KVCache_manager(self.attn_layer_idx) # b,h,s,d
-        torch.cuda.synchronize()
+        
+                
+
         
         if k == self.policy.num_gpu_batches - 1:
             # Clear the weight_read_buf if it is the last gpu batch
@@ -367,7 +456,9 @@ class SelfAttention:
             ((w_q, _), (b_q, _), (w_k, _), (b_k, _),
              (w_v, _), (b_v, _), (w_out, _), (b_out, _),
              (w_ln, _), (b_ln, _)) = weight_read_buf.val
+        
 
+         
         if i == 0:  # prefill
             mask, donate[1] = attention_mask.val.smart_copy(self.compute)
             h, new_k_cache, new_v_cache = self.compute.mha(h, mask, w_q, b_q,
@@ -375,14 +466,31 @@ class SelfAttention:
                 self.policy.compress_cache, self.policy.comp_cache_config)
              
         else:  # decoding
+            ############################################
+            k_cache_gpu,v_cache_gpu,k_cache_cpu,v_cache_cpu = self.KVCache_manager(self.attn_layer_idx) # b,h,s,d
+             
+            k_cache_gpu = k_cache_gpu.to(h.device.name)
+            v_cache_gpu = v_cache_gpu.to(h.device.name)
+            if k_cache_cpu is not None:
+                cpu_attn_size = self.KVCache_manager.cpu_attn_sizes[self.attn_layer_idx]
+                start_size  = self.KVCache_manager.start_sizes[self.attn_layer_idx]
+            
+            torch.cuda.synchronize()
+            if self.attn_layer_idx==0:
+                info = f"GPU cache size: {k_cache_gpu.size(-2)}"
+                if k_cache_cpu is not None:  info +=  f" | CPU cache size: {k_cache_cpu.size(-2)}"
+                logger.info(info)
+            ############################################
             mask, donate[1] = attention_mask.val.smart_copy(self.attention_compute)
             h, new_k_cache, new_v_cache = self.compute.mha_gen(h, mask, w_q,
                 b_q, w_k, b_k, w_v, b_v, w_out, b_out, w_ln, b_ln, n_head,
                 k_cache_gpu,v_cache_gpu,k_cache_cpu,v_cache_cpu, donate, self.policy.attn_sparsity,
-                self.policy.compress_cache, self.policy.comp_cache_config)
+                self.policy.compress_cache, self.policy.comp_cache_config, cpu_attn_size,start_size)
             
         kv_cache_2add = (new_k_cache, new_v_cache)
+        
         self.KVCache_manager.add_kv_cache_by_layer(self.attn_layer_idx, kv_cache_2add)
+        self.KVCache_manager.preload_layer_kv(self.attn_layer_idx,device=new_k_cache.device)
         hidden.val = h
 
 
@@ -591,7 +699,7 @@ class OptLM:
                 self.layers[j].load_weight(self.weight_home[j], self.weight_read_buf[j], k)
         else:
             self.layers[j].load_weight(self.weight_home[j], self.weight_read_buf[j], k)
-
+    
     def delete_weight(self, j, k):
         if k == 0:
             for x in self.weight_home[j].pop():
@@ -637,6 +745,7 @@ class OptLM:
         if i == self.task.gen_len - 1:  # last token, no need to store cache
             self.cache_write_buf[j][k].pop()
             return
+
 
         # Store cache_write_buf to cache_home
         # Delete cache_write_buf
@@ -846,12 +955,12 @@ class OptLM:
                     self.load_weight(i, j, k, overlap=False)
 
                 for k in range(self.num_gpu_batches):
-                    self.load_cache(i, j, k, overlap=False)
+ 
                     self.load_hidden(i, j, k)
                     self.compute_layer(i, j, k)
                     self.sync()
                     self.store_hidden(i, j, k)
-                    self.store_cache(i, j, k, overlap=False)
+               
             timers("generate").stop()
 
     def generation_loop_debug_normal(self):
@@ -1138,11 +1247,9 @@ def run_flexgen(args):
     cache_size = opt_config.cache_bytes(num_prompts, prompt_len + gen_len)
     hidden_size = opt_config.hidden_bytes(num_prompts, prompt_len + gen_len)
 
-    
-
+ 
     model = OptLM(opt_config, env, args.path, policy)
-    
-    print(opt_config)
+     
     # Task and policy
     warmup_inputs = get_inputs(2048, num_prompts, tokenizer, args.warmup_input_path)
     inputs = get_inputs(prompt_len, num_prompts, tokenizer, args.test_input_path)
@@ -1150,11 +1257,12 @@ def run_flexgen(args):
     ###################################
     #             beyond              #
     ###################################
-
+    start_size=args.start_size
+    recent_size=args.recent_size
     global layer_idx
     KVCache_manager = KVCache_manager_(
-        start_size=4,
-        recent_size=40,
+        start_size=start_size,
+        recent_size=recent_size,
         k_seq_dim=2,
         v_seq_dim=2,
         head_dim=opt_config.hidden_size//opt_config.n_head,
@@ -1163,32 +1271,23 @@ def run_flexgen(args):
         gpu_cache_max=2000,
         cpu_attn_size=2000,
         copy_stream = torch.cuda.Stream(),
-        gpu_cache_device="cuda",
+        gpu_cache_device="cpu",
     )
-    config = model.config 
+    
     layer_idx = opt_config.num_hidden_layers-1  
-    cpu_stream = torch.cuda.Stream()
-    merge_state    = merge_state_(opt_config.n_head)
-    mha_lse        = mha_lse_methods('llama')
- 
-    def replace_layer(model):
-        for name, module in reversed(model._modules.items()):
-            if len(list(module.children())) > 0:
-                replace_layer( module,)
- 
+     
+    def add_module(model):
+        for   module in reversed(model.layers):
             if isinstance(module, SelfAttention):
+    
                 global layer_idx
-                model._modules[name].attn_layer_idx  = layer_idx
-                model._modules[name].rotary_emb_cpu  = rotary_emb_cpu
-                model._modules[name].merge_state  = merge_state
-                model._modules[name].mha_lse  = mha_lse
-                model._modules[name].KVCache_manager = KVCache_manager
-                model._modules[name].cpu_stream = cpu_stream
+                module.attn_layer_idx  = layer_idx
+                module.KVCache_manager = KVCache_manager
                 layer_idx -= 1  # layer are reverseved travesed 
-    replace_layer(model)
+    add_module(model)
 
 
-
+    KVCache_manager.print_coverage()
     ###################################
 
     try:
@@ -1228,6 +1327,8 @@ def run_flexgen(args):
     print("=================================================")
 
 def add_parser_arguments(parser):
+    parser.add_argument("--start_size", type=int, default=4)
+    parser.add_argument("--recent_size", type=int, default=30)
     parser.add_argument("--model", type=str, default="facebook/opt-6.7b",
         help="The model name.")
     parser.add_argument("--path", type=str, default="~/opt_weights",

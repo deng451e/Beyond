@@ -18,9 +18,7 @@ from beyond.attention_methods import (
     mha_lse_methods,
     merge_state_,
 )
-
-mha_lse = mha_lse_methods("flexgen-opt")
-merge_state = merge_state_(32)
+ 
 
 from flexgen.utils import (GB, T, cpu_mem_stats, vector_gather,
     np_dtype_to_torch_dtype, torch_dtype_to_np_dtype,
@@ -364,24 +362,17 @@ class TorchDevice:
         if donate[0]: inputs.delete()
         if donate[1]: attention_mask.delete()
 
-        # (s, b * n_head, head_dim)
-        k = k.permute(2, 0, 1)
-        v = v.permute(1, 0, 2)
-
-        if compress_cache:
-            k = self.compressed_device.compress(k, comp_config)
-            v = self.compressed_device.compress(v, comp_config)
-        else:
-            k = TorchTensor.create_from_torch(k, self)
-            v = TorchTensor.create_from_torch(v, self)
-
+        # b,h,s,d
+        k = k.reshape(b,n_head,head_dim,s).permute(0, 1, 3,2)
+        v = v.reshape(b,n_head,s,head_dim) 
+         
         return TorchTensor.create_from_torch(value, self), k, v
 
      
 
-    def mha_gen(self, inputs, attention_mask, w_q, b_q, w_k, b_k, w_v, b_v,
+    def mha_gen(self, inputs, attention_mask_, w_q, b_q, w_k, b_k, w_v, b_v,
                 w_out, b_out, w_ln, b_ln, n_head, k_cache_gpu,v_cache_gpu,k_cache_cpu,v_cache_cpu, donate,
-                attn_sparsity, compress_cache, comp_config):
+                attn_sparsity, compress_cache, comp_config, cpu_attn_size,start_size):
         """Multi-head attention (decoding phase)."""
 
         ''''
@@ -395,7 +386,7 @@ class TorchDevice:
             w_out = w_out.device.decompress(w_out)
 
         b, q_len, h = inputs.shape
-        src_s = attention_mask.shape[1]
+        src_s = attention_mask_.shape[1]
         head_dim = h // n_head
         scaling = head_dim ** -0.5
 
@@ -406,25 +397,21 @@ class TorchDevice:
         k = F.linear(hidden, w_k.data, bias=b_k.data)
         v = F.linear(hidden, w_v.data, bias=b_v.data)
         # b,qs,h,d
-        q = q.view(b, q_len, n_head, head_dim).permute(0, 2, 1, 3)
-        k = k.view(b, q_len, n_head, head_dim)
-        v = v.view(b, q_len, n_head, head_dim)
+        q     = q.view(b, q_len, n_head, head_dim).permute(0, 2, 1, 3)
+        k_new = k.view(b, q_len, n_head, head_dim).permute(0, 2, 1, 3)
+        v_new = v.view(b, q_len, n_head, head_dim).permute(0, 2, 1, 3)
 
-        # bh,qs,d
-        q     = q.permute(0, 2, 1, 3)  
-        k_new = k.permute(0, 2, 1, 3)
-        v_new = v.permute(0, 2, 1, 3)
+       
 
+         
 
+        mha_lse = mha_lse_methods("flexgen-opt")
+        merge_state = merge_state_(n_head)
 
         kv_seq_len = q_len
         if k_cache_gpu is not None:
 
-            if self.attn_layer_idx==0:
-                info = f"GPU cache size: {k_cache_gpu.size(-2)}"
-                if k_cache_cpu is not None:  info +=  f" | CPU cache size: {k_cache_cpu.size(-2)}"
-                logger.info(info)
-                
+           
 
             kv_seq_len += k_cache_gpu.size(-2) 
             k_cache_gpu = torch.cat([k_cache_gpu, k_new], dim=2)
@@ -434,21 +421,20 @@ class TorchDevice:
             v_cache_gpu = v_new
         
         
-        
         if k_cache_cpu is not None:
-            cpu_attn_size = min(k_cache_cpu.size(-2) ,self.KVCache_manager.cpu_attn_sizes[self.attn_layer_idx])
+            cpu_attn_size = min(k_cache_cpu.size(-2) ,cpu_attn_size)
             kv_seq_len += cpu_attn_size
-            start_size  = self.KVCache_manager.start_sizes[self.attn_layer_idx]
             
-        if attention_mask is not None: 
-        
-            attn_weights[:,:,:,-q_len:] = attn_weights[:,:,:,-q_len:] + attention_mask
+            
+        if attention_mask_ is not None: 
+            
+            attention_mask = attention_mask_.data[:,-q_len:] 
 
         
         # Mix CPU&GPU attention
         if k_cache_cpu is not None and cpu_attn_size!=0:
          
-            attention_mask_q = attention_mask if q_len!=1 else None 
+            attention_mask_q = attention_mask  if q_len!=1 else None 
             #####################
             #   CPU Attention   # 
             #####################
@@ -460,9 +446,6 @@ class TorchDevice:
                 v_cache_cpu = torch.cat([v_cache_cpu, v_new.to('cpu')], dim=2)
                 q_cpu = q.detach().to('cpu')
                 attention_mask_q_cpu = attention_mask_q.to('cpu') if attention_mask_q is not None else attention_mask_q 
-            
-
-                
               
                 v_cpu,s_cpu = mha_lse(q_cpu,k_cache_cpu,v_cache_cpu,attention_mask_q_cpu)
             
@@ -484,7 +467,7 @@ class TorchDevice:
             
             self.cpu_stream.synchronize()
             attn_output,_ = merge_state(v_cpu,s_cpu,v_gpu,s_gpu)
-            torch.cuda.synchronize()
+           
             
             # Default Full GPU attention
         else:   
@@ -510,10 +493,9 @@ class TorchDevice:
 
         if donate[0]: inputs.delete()
         if donate[1]: attention_mask.delete()
-
-        
-
+ 
         return TorchTensor.create_from_torch(value, self), k_new, v_new
+
 
     def _attention_weights(self, q, k, mask, b, src_s, n_head):
         # shape: (b * n_head, 1, s)

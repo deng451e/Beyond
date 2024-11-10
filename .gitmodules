@@ -1,6 +1,5 @@
- 
-
 [submodule "3rdparty/InfiniGen"]
 	path = 3rdparty/InfiniGen
 	url = git@github.com:snu-comparch/InfiniGen.git
-	update = recursive
+	 
+

@@ -3,3 +3,7 @@
 	url = git@github.com:snu-comparch/InfiniGen.git
 	 
 
+[submodule "3rdparty/flashinfer"]
+	path = 3rdparty/flashinfer
+	url = git@github.com:deng451e/flashinfer.git
+	 

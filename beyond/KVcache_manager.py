@@ -49,22 +49,16 @@ class KVCache_manager_:
         self.cpu_kv_flags  = [False for _ in range(num_layers)]   
         self.cpu_attn_sizes = [cpu_attn_size for _ in range(num_layers)] 
         self.blk_num       = [0 for _ in range(num_layers)] 
-        self.blk_tracker = None 
-        self.blk_min_max = None 
-         
-         
-    def get_past_key_values_length(self,):
-        k_gpu,_,k_cpu,_ =  self.kv_cache[0] 
-        hold = k_gpu.size(self.k_seq_dim) if k_gpu is not None else 0
-        hold +=  k_cpu.size(self.k_seq_dim) if k_cpu is not None else 0
-        return hold
+        ######################
+        self.blk_idx = [[] for _ in range(num_layers)] 
+        self.blk_dim_min_max = [[] for _ in range(num_layers)] 
+        
+          
 
     def __call__(self,idx):
         assert 0<=idx<self.num_layers, f"invalid layer index {idx}"
         return self.kv_cache[idx]
-
-    def usecase_warn(self,f,log):
-        if f: print(f"warning: [{log}]")
+ 
 
     def modify_recent_size_by_layer(self,idx,recent_size):     
         self.recent_sizes[idx] = recent_size 
@@ -248,11 +242,7 @@ class KVCache_manager_:
                     ),
                     ]
                 
-
-        # if idx==self.num_layers-1:
-        #     torch.cuda.synchronize()
-
-        # self.update_blk_tracker_by_layer(idx)
+ 
         return 
 
 
@@ -265,34 +255,7 @@ class KVCache_manager_:
         return 
      
     
-    
-    def update_blk_tracker_by_layer(self,idx):
-        
-        
-        # to be optimized ...
-        if self.cpu_kv_flags[idx]:
-            k_cpu  = self.kv_cache[idx][2]
-            k_cpu_shape = k_cpu.size()
-            cache_len = k_cpu_shape[self.k_seq_dim]
-            pad_len = self.blk_size-cache_len%self.blk_size
-            self.blk_num[idx] = (cache_len+self.blk_size-1)//self.blk_size
-           
-           
-            pad_ = ([0 for _ in range((k_cpu.dim()-self.k_seq_dim-1)*2)] + [0,pad_len])
-            reshape_ = [k_cpu_shape[i] for i in range(k_cpu.dim())]
-            reshape_[self.k_seq_dim] =  self.blk_size
-            reshape_.insert(self.k_seq_dim,-1 )   
-            reshape_ = tuple(reshape_)
-            
-            blk = F.pad( k_cpu, pad=pad_, value=0).reshape(reshape_)
-                
-            
-            self.blk_dim_min_max = [
-                blk.min(dim=self.k_seq_dim+1)[0],
-                blk.max(dim=self.k_seq_dim+1)[0]
-                ] 
-                     
-        return 
+     
   
     def preload_layer_kv(self,idx,device='cuda'):
         with torch.cuda.stream(self.copy_stream):
@@ -305,19 +268,7 @@ class KVCache_manager_:
                 self.kv_cache[idx] = [k_gpu.to(device, non_blocking=True),v_gpu.to(device, non_blocking=True),k_cpu,v_cpu]
         return 
         
-    def print_kv_static(self,idx=None):
-        def print_(idx):
-            k_gpu,v_gpu,k_cpu,v_cpu = self.kv_cache[idx]
-            gpu_len = k_gpu.size(self.k_seq_dim) if k_gpu is not None else 0 
-            cpu_len = k_cpu.size(self.k_seq_dim) if k_cpu is not None else 0 
-            print(f"layer:{idx}, GPU cache size:{gpu_len}, CPU cache size:{cpu_len}")
-        if idx is not None:  
-            print_(idx)
-        else:
-            for idx in range( self.num_layers):
-                 print_(idx)
- 
-        return 
+    
     
 
     def print_coverage(self,idx=None):
@@ -330,7 +281,7 @@ class KVCache_manager_:
         return 
 
 
-    def print_block_info(self,idx=None):
+    def print_blk_info(self,idx=None):
         if idx is not None:
             print(f"CPU blocks at Layer {idx}:{self.blk_num[idx]}")
         else:
@@ -341,6 +292,78 @@ class KVCache_manager_:
         return 
 
 
+    def update_blk(self,):
+        for idx  in range(self.num_layers):
+            self.update_blk_by_layer(idx)  
+        return 
+     
+    
+    def update_blk_by_layer(self,idx):
+        '''
+        tracking the coarse grained K cache info
+        '''
+        # to be optimized ...
+    
+        if self.cpu_kv_flags[idx]:
+            with torch.cuda.stream(self.copy_stream):
+                if  not self.blk_idx[idx]:
+                    
+                    k_cpu  = self.kv_cache[idx][2]
+                    k_cpu_shape = k_cpu.size()
+                    cache_len = k_cpu_shape[self.k_seq_dim]
+                    pad_len = self.blk_size-cache_len%self.blk_size
+
+                    self.blk_num[idx] = (cache_len+self.blk_size-1)//self.blk_size
+                    self.blk_idx[idx] = [(start,min(cache_len,start+self.blk_size)) for start in range(0,cache_len,self.blk_size)]
+                
+                    pad_ = ([0 for _ in range((k_cpu.dim()-self.k_seq_dim-1)*2)] + [0,pad_len])
+                    reshape_ = [k_cpu_shape[Dim] for Dim in range(k_cpu.dim())]
+                    reshape_[self.k_seq_dim] =  self.blk_size
+                    reshape_.insert(self.k_seq_dim,-1 )   
+                    reshape_ = tuple(reshape_)
+                    
+                    #b,h,s//blks,blks,d
+                    blk = F.pad( k_cpu, pad=pad_, value=0).reshape(reshape_)
+                        
+                    
+                    #b,h,s//blks,2,d
+                    self.blk_dim_min_max[idx] = [
+                        blk.min(dim=self.k_seq_dim+1)[0],
+                        blk.max(dim=self.k_seq_dim+1)[0]
+                        ] 
+                else:
+                    
+                    pre_start = self.blk_idx[idx][-1][0]
+                   
+                    k_cpu = self.k_slice(self.kv_cache[idx][2],pre_start,None) 
+                
+                    k_cpu_shape = k_cpu.size()
+                    
+                    cache_len = k_cpu_shape[self.k_seq_dim]
+                    pad_len = self.blk_size-cache_len%self.blk_size
+                    self.blk_num[idx]      += (cache_len+self.blk_size-1)//self.blk_size-1
+                    self.blk_idx[idx] = self.blk_idx[idx][:-1]
+                    self.blk_idx[idx] += [(start,min(pre_start+cache_len,start+self.blk_size)) for start in range(pre_start,pre_start+cache_len,self.blk_size)]
+            
+
+                    pad_ = ([0 for _ in range((k_cpu.dim()-self.k_seq_dim-1)*2)] + [0,pad_len])
+                    reshape_ = [k_cpu_shape[Dim] for Dim in range(k_cpu.dim())]
+                    reshape_[self.k_seq_dim] =  self.blk_size
+                    reshape_.insert(self.k_seq_dim,-1 )   
+                    reshape_ = tuple(reshape_)
+                    
+                    #b,h,s//blks,blks,d
+                    blk = F.pad( k_cpu, pad=pad_, value=0).reshape(reshape_)
+                        
+                    blk_min, blk_max  = self.blk_dim_min_max[idx]  
+                    #b,h,s//blks,2,d
+                   
+                    self.blk_dim_min_max[idx] = [
+                        torch.cat([self.k_slice(blk_min,None,-1),blk.min(dim=self.k_seq_dim+1)[0]],dim=self.k_seq_dim),
+                        torch.cat([self.k_slice(blk_max,None,-1),blk.max(dim=self.k_seq_dim+1)[0]],dim=self.k_seq_dim)
+                        ] 
+        return 
+    
 
 
  
@@ -370,9 +393,9 @@ def test_correctness(args,log):
     num_layers=32; seq_len = args.seq_len;num_heads=32;head_dim=128; batch_size=args.batch_size
    
     batch_size = args.batch_size; block_size=args.block_size
-    copy_stream = torch.cuda.Stream()
+     
     KVCache_manager =  KVCache_manager_( 
-                copy_stream=copy_stream,
+                copy_stream=torch.cuda.Stream(),
                 block_size=block_size,
                 gpu_cache_device=gpu_cache_device,
                 num_layers=num_layers)
@@ -384,7 +407,7 @@ def test_correctness(args,log):
     past_key_values =  [[k_cache,v_cache] for _ in range(num_layers)]
     KVCache_manager.add_kv_cache(past_key_values)
      
-    
+    KVCache_manager.update_blk()
     
     # test case 2: add kv cache
     for add_len in [1,10,50,60,100,1000]:
@@ -394,27 +417,26 @@ def test_correctness(args,log):
         past_key_values2add =  [[k_cache2add,v_cache2add] for _ in range(num_layers)]
          
         KVCache_manager.add_kv_cache(past_key_values2add)
-        KVCache_manager.print_gpu_coverage(0)
+        KVCache_manager.update_blk()
        
+        KVCache_manager.print_blk_info(0)
     
     print("====================================")
     
     # test case 3: add kv cache by layer
-    for add_len in [1,10,50,60,100,1000]:
+    for add_len in [1,10,50,60,100,200,1000]:
         for idx in range(num_layers):
             k_cache2add = torch.randn(batch_size, num_heads, add_len,head_dim, device=gpu_cache_device).half()
             v_cache2add = torch.randn(batch_size, num_heads, add_len,head_dim, device=gpu_cache_device).half()
-
             past_key_values2add =  [ k_cache2add,v_cache2add]
             
             KVCache_manager.add_kv_cache_by_layer(idx,past_key_values2add)
-        KVCache_manager.print_gpu_coverage(0)
-        KVCache_manager.print_block_info(0)
+            # KVCache_manager.update_blk_by_layer(idx)
+        
+        KVCache_manager.print_blk_info(0)
     print("====================================")
-   
+  
     print(f"time taken:{time.time()-st}")
-
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

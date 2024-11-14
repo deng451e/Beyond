@@ -40,8 +40,10 @@ def test(args,log):
 
     cpu_t = []
     for _ in range(repeat+3):
+        torch.cuda.synchronize()
         st = time.time()
         OUTPUT_cpu = mha_normal(q_cpu,k_cpu,v_cpu)
+        torch.cuda.synchronize()
         cpu_t.append(time.time()-st)
    
     out+=f"cpu_time:{np.mean(cpu_t[3:])},"
@@ -52,9 +54,11 @@ def test(args,log):
     #####################
     pcie_t = []
     for _ in range(repeat+3):
+        torch.cuda.synchronize()
         st = time.time() 
         k_gpu = k_cache.cuda()
         v_gpu = v_cache.cuda()
+        torch.cuda.synchronize()
         pcie_t.append(time.time()-st)
     
     out+=f"transfer_time:{np.mean(pcie_t[3:])},"
@@ -67,8 +71,10 @@ def test(args,log):
     #####################
     gpu_t = []
     for _ in range(repeat+3):
+        torch.cuda.synchronize()
         st = time.time() 
         OUTPUT_gpu = mha_normal(q,k_gpu ,v_gpu)
+        torch.cuda.synchronize()
         gpu_t.append(time.time()-st)
 
     out+=f"gpu_time: {np.mean(gpu_t[3:])}"

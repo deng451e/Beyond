@@ -2,7 +2,7 @@ rm results/sparse-attention-test.log
 
 for ratio in 0.1  0.3 0.5 0.7 0.9
 do 
-  for seq_len in 10 100 1000 10000 100000
+  for seq_len in 10 100 1000 10000 50000
   do
       for q_len in 1 10 100
         do
@@ -26,7 +26,7 @@ rm results/dense-attention-test.log
 
 for batch_sizse in 1 10 
 do 
-  for seq_len in 10 100 1000 10000 100000
+  for seq_len in 10 100 1000 10000 50000
   do
       for q_len in 1 10 100
         do

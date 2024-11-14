@@ -84,15 +84,18 @@ def test(args,log):
         attn_weights = torch.matmul(q_cpu.float(), k_cpu.transpose(2, 3).float())  # b,h,qs,s
         attn_weights = attn_weights.reshape(b*h,qs,s).permute(2,1,0)
         ######
+        torch.cuda.synchronize()
         st = time.time()
         k_cpu_select,v_cpu_select = mha_sparse_selection(q_cpu,attn_weights,k_cpu,v_cpu,top_k)
+        torch.cuda.synchronize()
         cpu_selec_t.append(time.time()-st)
 
         k_cpu_ = torch.cat([k_cpu_select,k.cpu()],dim=k_dim)
         v_cpu_ = torch.cat([v_cpu_select,v.cpu()],dim=k_dim)
-
+        torch.cuda.synchronize()
         st = time.time()
         OUTPUT_cpu = mha_normal(q_cpu,k_cpu_,v_cpu_ )
+        torch.cuda.synchronize()
         cpu_attn_t.append(time.time()-st)
    
     out+=f"cpu select time:{np.mean(cpu_selec_t[3:])},cpu attn time:{np.mean(cpu_attn_t[3:])},"
@@ -116,15 +119,18 @@ def test(args,log):
         attn_weights = torch.matmul(q_gpu.float(), k_gpu.transpose(2, 3).float())  # b,h,qs,s
         attn_weights = attn_weights.reshape(b*h,qs,s).permute(2,1,0)
         ######
+        torch.cuda.synchronize()
         st = time.time()
         k_gpu_select,v_gpu_select = mha_sparse_selection(q_gpu,attn_weights,k_gpu,v_gpu,top_k)
+        torch.cuda.synchronize()
         gpu_selec_t.append(time.time()-st)
 
         k_gpu_ = torch.cat([k_gpu_select,k.cuda()],dim=k_dim)
         v_gpu_ = torch.cat([v_gpu_select,v.cuda()],dim=k_dim)
-
+        torch.cuda.synchronize()
         st = time.time()
         OUTPUT_gpu = mha_normal(q_gpu,k_gpu_,v_gpu_ )
+        torch.cuda.synchronize()
         gpu_attn_t.append(time.time()-st)
    
     out+=f"gpu select time:{np.mean(gpu_selec_t[3:])},gpu attn time:{np.mean(gpu_attn_t[3:])},"

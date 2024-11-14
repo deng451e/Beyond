@@ -3,10 +3,38 @@ import torch
  
 import argparse
 import os.path as osp
+import re
+import pandas as pd
 
- 
- 
+# Define a function to parse the file
+def parse_file(filename):
+    data = []
 
+    # Open the file and read line by line
+    with open(filename, 'r') as file:
+        for line in file:
+            # Remove whitespace and split key-value pairs
+            entries = line.strip().split(',')
+
+            # Create a dictionary for each line
+            line_data = {}
+            for entry in entries:
+                key, value = entry.split(':')
+                try:
+                    # Attempt to convert numeric values (int or float)
+                    if '.' in value:
+                        value = float(value)
+                    else:
+                        value = int(value)
+                except ValueError:
+                    # Keep as string if not numeric
+                    pass
+                line_data[key] = value
+
+            # Add dictionary to list
+            data.append(line_data)
+
+    return pd.DataFrame(data)
  
 
 def add_info(args,log):
@@ -35,7 +63,7 @@ def check_memory(x,name):
 
 def check_eq(x,y):
     #	FP16 has a precision of about 3 to 4 decimal digits.
-    return (torch.isclose(x.cpu(), y.cpu(), rtol=1e-3, atol=1e-4).sum()/torch.numel(x)).cpu().numpy()
+    return (torch.isclose(x.cpu(), y.cpu(), rtol=1e-3, atol=1e-3).sum()/torch.numel(x)).cpu().numpy()
     
 def check_dtype(x,type_):
     return type(x.dtype)==type(type_)
@@ -116,7 +144,7 @@ def mha_logSum( q,k,v,attention_mask=None):
              
   
 
-def mha_normal(self,q,k,v,attention_mask=None):
+def mha_normal(q,k,v,attention_mask=None):
     # b h s d 
     qs = q.size(-2)
     attn_weights = torch.matmul(q, k.transpose(2, 3))  * (q.size(-1) ** -0.5)

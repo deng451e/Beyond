@@ -2,11 +2,7 @@ from beyond.attention_methods import *
 from beyond.utils import mha_normal
 import numpy as np 
 import torch.nn.functional as F
-# bh,qs,s
-# s,qs,bh
-# prefetch_idx = torch.topk( 
-#         p_attn.permute(2, 1, 0), min(int(mean), max_num_kv), dim=0
-#     )[1]
+ 
 
 def mha_sparse_selection(q,attn_weights,k_cache,v_cache ,topk):
     # b h s d 

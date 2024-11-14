@@ -8,12 +8,11 @@ import torch.nn.functional as F
 #         p_attn.permute(2, 1, 0), min(int(mean), max_num_kv), dim=0
 #     )[1]
 
-def mha_sparse_selection(q,k_cache,v_cache ,topk):
+def mha_sparse_selection(q,attn_weights,k_cache,v_cache ,topk):
     # b h s d 
     qs = q.size(-2)
     b,h,s,d = k_cache.size()
-    attn_weights = torch.matmul(q.float(), k_cache.transpose(2, 3).float())  # b,h,qs,s
-    attn_weights = attn_weights.reshape(b*h,qs,s).permute(2,1,0)
+   
     
     indices = torch.topk(attn_weights , topk,dim=0)[1]
         
@@ -78,8 +77,14 @@ def test(args,log):
     cpu_selec_t = []
     cpu_attn_t = []
     for _ in range(repeat+3):
+        ######
+        qs = q.size(-2)
+        b,h,s,d = k_cache.size()
+        attn_weights = torch.matmul(q_cpu.float(), k_cpu.transpose(2, 3).float())  # b,h,qs,s
+        attn_weights = attn_weights.reshape(b*h,qs,s).permute(2,1,0)
+        ######
         st = time.time()
-        k_cpu_select,v_cpu_select = mha_sparse_selection(q_cpu,k_cpu,v_cpu,top_k)
+        k_cpu_select,v_cpu_select = mha_sparse_selection(q_cpu,attn_weights,k_cpu,v_cpu,top_k)
         cpu_selec_t.append(time.time()-st)
 
         k_cpu_ = torch.cat([k_cpu_select,k.cpu()],dim=k_dim)
@@ -104,8 +109,14 @@ def test(args,log):
     gpu_selec_t = []
     gpu_attn_t = []
     for _ in range(repeat+3):
+        ######
+        qs = q.size(-2)
+        b,h,s,d = k_cache.size()
+        attn_weights = torch.matmul(q_gpu.float(), k_gpu.transpose(2, 3).float())  # b,h,qs,s
+        attn_weights = attn_weights.reshape(b*h,qs,s).permute(2,1,0)
+        ######
         st = time.time()
-        k_gpu_select,v_gpu_select = mha_sparse_selection(q_gpu,k_gpu,v_gpu,top_k)
+        k_gpu_select,v_gpu_select = mha_sparse_selection(q_gpu,attn_weights,k_gpu,v_gpu,top_k)
         gpu_selec_t.append(time.time()-st)
 
         k_gpu_ = torch.cat([k_gpu_select,k.cuda()],dim=k_dim)

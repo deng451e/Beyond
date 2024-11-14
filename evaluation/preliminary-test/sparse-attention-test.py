@@ -53,6 +53,7 @@ def test(args,log):
     seq_len = args.seq_len
     q_len = args.q_len
     top_k = args.top_k
+    print(top_k)
     head_dim = hidden_size//num_heads
     
 
@@ -143,8 +144,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--top_k", type=float, default=100)
     
-    parser.add_argument("--seq_len", type=int, default=1000 )
-    parser.add_argument("--q_len", type=int, default=10)
+    parser.add_argument("--seq_len", type=int, default=10000 )
+    parser.add_argument("--q_len", type=int, default=1)
 
     # model config 
     parser.add_argument("--num_heads", type=int, default=32)
@@ -152,7 +153,7 @@ if __name__ == "__main__":
    
 
     # test config 
-    parser.add_argument("--repeat", type=int, default=10)
+    parser.add_argument("--repeat", type=int, default=20)
 
     args = parser.parse_args()
     args.top_k = int(args.top_k)

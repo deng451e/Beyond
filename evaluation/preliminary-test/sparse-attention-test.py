@@ -53,7 +53,7 @@ def test(args,log):
     seq_len = args.seq_len
     q_len = args.q_len
     top_k = args.top_k
-    print(top_k)
+    
     head_dim = hidden_size//num_heads
     
 

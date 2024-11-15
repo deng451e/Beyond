@@ -84,7 +84,7 @@ for i,batch_size in enumerate([1,10]):
 
         # Set title, labels, and legend for the first subplot
         axs[i*2+j].set_title(f'Query Size:{q_len},Batch Size:{batch_size}',fontsize=16)
-        axs[i*2+j].set_xlabel('kv cache size',fontsize=16)
+         
         
         axs[i*2+j].set_xticks(index + bar_width / 2)
         axs[i*2+j].set_xticklabels(x_labels)
@@ -101,6 +101,8 @@ for i,batch_size in enumerate([1,10]):
         
 
 #  
+axs[2].set_xlabel('kv cache size',fontsize=16)
+axs[3].set_xlabel('kv cache size',fontsize=16)
 axs[0].set_ylabel('time taken (sec)',fontsize=16)
 axs[2].set_ylabel('time taken (sec)',fontsize=16)
 axs[0].legend(fontsize=12)

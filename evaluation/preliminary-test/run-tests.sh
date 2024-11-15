@@ -22,24 +22,24 @@ do
 done
 
 
-# rm results/dense-attention-test.log
+rm results/dense-attention-test.log
 
-# for batch_sizse in 1 10 
-# do 
-#   for seq_len in 10 100 1000 10000 50000
-#   do
-#       for q_len in 1 10 100
-#         do
+for batch_sizse in 1 10 
+do 
+  for seq_len in 10 100 1000 10000 50000
+  do
+      for q_len in 1 10 100
+        do
            
             
-#             CMD="--batch_size $batch_sizse --seq_len $seq_len   --q_len $q_len"
+            CMD="--batch_size $batch_sizse --seq_len $seq_len   --q_len $q_len"
           
             
-#             outpt=$(python   dense-attention-test.py $CMD   2>&1  )  
-#             echo "$outpt" | tee -a results/dense-attention-test.log
-#       done
-#   done
-# done
+            outpt=$(python   dense-attention-test.py $CMD   2>&1  )  
+            echo "$outpt" | tee -a results/dense-attention-test.log
+      done
+  done
+done
 
  
 python plot.py

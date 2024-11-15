@@ -63,7 +63,7 @@ dims = [2**n for n in range(1,6)]
 bar_width = 0.35  # Width of the bars
 index = np.arange(len(dims))  # X locations for the bars
 q_len = 100
-fig, axs = plt.subplots(2, 2, figsize=(10, 6))
+fig, axs = plt.subplots(2, 2, figsize=(10, 5))
 axs = axs.flatten()
 for i,batch_size in enumerate([1,10]):
     for j,q_len in enumerate([1,100]):

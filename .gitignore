@@ -1,0 +1,7 @@
+*.log 
+*.pdf
+*.egg-info
+__init__.py
+__pycache__
+data
+ 

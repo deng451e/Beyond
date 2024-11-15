@@ -54,8 +54,8 @@ def test(args,log):
     
 
     k_dim   =  2
-    k_cache = torch.randn(batch_size,num_heads,seq_len,head_dim, device='cpu').half()
-    v_cache = torch.randn(batch_size,num_heads,seq_len,head_dim, device='cpu').half()
+    k_cache = torch.randn(batch_size,num_heads,seq_len,head_dim, device='cpu').half().pin_memory()
+    v_cache = torch.randn(batch_size,num_heads,seq_len,head_dim, device='cpu').half().pin_memory()
     q       = torch.randn(batch_size,num_heads,q_len,head_dim, device='cuda:0').half() 
     k       = torch.randn(batch_size,num_heads,q_len,head_dim, device='cuda:0').half() 
     v       = torch.randn(batch_size,num_heads,q_len,head_dim, device='cuda:0').half() 

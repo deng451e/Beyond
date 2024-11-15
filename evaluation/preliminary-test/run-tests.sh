@@ -1,25 +1,25 @@
-rm results/sparse-attention-test.log
+# rm results/sparse-attention-test.log
 
-for ratio in 0.1  0.3 0.5 0.7 0.9
-do 
-  for seq_len in 10 100 1000 10000 50000
-  do
-      for q_len in 1 10 100
-        do
+# for ratio in 0.1  0.3 0.5 0.7 0.9
+# do 
+#   for seq_len in 10 100 1000 10000 50000
+#   do
+#       for q_len in 1 10 100
+#         do
           
               
           
             
-            topk=$(echo "$ratio * $seq_len" | bc)
+#             topk=$(echo "$ratio * $seq_len" | bc)
  
-            CMD="--top_k $topk --seq_len $seq_len   --q_len $q_len"
+#             CMD="--top_k $topk --seq_len $seq_len   --q_len $q_len"
           
             
-            outpt=$(python   sparse-attention-test.py $CMD   2>&1  )  
-            echo "$outpt" | tee -a results/sparse-attention-test.log
-      done
-  done
-done
+#             outpt=$(python   sparse-attention-test.py $CMD   2>&1  )  
+#             echo "$outpt" | tee -a results/sparse-attention-test.log
+#       done
+#   done
+# done
 
 
 rm results/dense-attention-test.log

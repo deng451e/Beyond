@@ -1,7 +1,7 @@
 
  
  
- ![schemes](../../figures/start-recent-weight-sum.png)
+ ![schemes](../../figures/attention-weight.png)
  
 
 

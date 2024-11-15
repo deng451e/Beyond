@@ -66,7 +66,7 @@ q_len = 100
 fig, axs = plt.subplots(2, 2, figsize=(10, 5))
 axs = axs.flatten()
 for i,batch_size in enumerate([1,10]):
-    for j,q_len in enumerate([1,100]):
+    for j,q_len in enumerate([1,10]):
         hold = df[(df['batch_size']==batch_size) & (df['q_len']==q_len)]
         x_labels = list( df[(df['batch_size']==batch_size) & (df['q_len']==q_len)]["seq_len"])
 

@@ -297,12 +297,15 @@ class KVCache_manager_:
             self.update_blk_by_layer(idx)  
         return 
      
-    
+    def get_blk_info(self,idx):
+        return  self.blk_idx[idx],self.blk_dim_min_max[idx] 
+
+
     def update_blk_by_layer(self,idx):
         '''
         tracking the coarse grained K cache info
         '''
-        # to be optimized ...
+         
     
         if self.cpu_kv_flags[idx]:
             with torch.cuda.stream(self.copy_stream):
@@ -437,7 +440,7 @@ def test_correctness(args,log):
     print("====================================")
   
     print(f"time taken:{time.time()-st}")
-
+    
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--batch_size", type=int, default=10)

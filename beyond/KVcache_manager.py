@@ -68,6 +68,11 @@ class KVCache_manager_:
         self.start_sizes[idx]  = start_size 
      
 
+    def get_past_key_values_length(self,):
+        k_gpu,_,k_cpu,_ =  self.kv_cache[0] 
+        hold = k_gpu.size(self.k_seq_dim) if k_gpu is not None else 0
+        hold +=  k_cpu.size(self.k_seq_dim) if k_cpu is not None else 0
+        return hold
 
     def add_kv_cache_by_layer(self, idx , kv_cache_2add):
          

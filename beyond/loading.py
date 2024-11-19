@@ -7,7 +7,6 @@ import urllib.request
 import os
 import json
   
- 
 
 def set_kv_manager_config( KVCache_manager,file_path=None):
     if file_path is  None: return KVCache_manager
@@ -98,8 +97,7 @@ def load_dataset_(dataset_path,cnt=100):
     prompts = []
     outputs = []
     print(f"Loading data from {dataset_path} ...")
-    if "data/"  not in dataset_path:
-        from datasets import load_dataset
+     
     match dataset_path:
         case "data/mt_bench.jsonl":
             test_filepath = os.path.join(dataset_path)
@@ -132,8 +130,7 @@ def load_dataset_(dataset_path,cnt=100):
             
             for sample in list_data :
                
-             
-            
+              
                 prompts += [ sample['Input']]
                
                  
@@ -143,3 +140,30 @@ def load_dataset_(dataset_path,cnt=100):
                     break
 
     return prompts,outputs
+
+
+
+########################
+# utils from infinigen
+ 
+def get_loaders(name, nsamples=128, seed=0, seqlen=2048, model=''):
+     
+    from transformers import LlamaTokenizer, AutoTokenizer
+    from datasets import load_dataset
+
+    if 'wikitext2' in name:
+        testdata = load_dataset('wikitext', 'wikitext-2-raw-v1', split='test')
+        try: 
+            tokenizer = AutoTokenizer.from_pretrained(model, use_fast=False)
+        except:
+            tokenizer = LlamaTokenizer.from_pretrained(model, use_fast=False)
+        testenc = tokenizer("\n\n".join(testdata['text']), return_tensors='pt')
+        return testenc
+    if 'ptb' in name:
+        valdata = load_dataset('ptb_text_only', 'penn_treebank', split='validation')
+        try: 
+            tokenizer = AutoTokenizer.from_pretrained(model, use_fast=False)
+        except:
+            tokenizer = LlamaTokenizer.from_pretrained(model, use_fast=False)
+        testenc = tokenizer("\n\n".join(valdata['sentence']), return_tensors='pt')
+        return testenc

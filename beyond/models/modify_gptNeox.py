@@ -11,7 +11,6 @@ from typing import Optional, Tuple
  
 
 from beyond.utils import *
-from beyond.selection_methods import selection_methods_
 from beyond.attention_methods import (
     merge_state_,
     mha_lse_methods,
@@ -200,7 +199,7 @@ def modified_GPTNeoX_attention_forward(
    
 
 
-    kv_cache_2add = (k, v) if use_cache else None
+    kv_cache_2add = (k, v) # if use_cache else None
     self.KVCache_manager.add_kv_cache_by_layer(self.attn_layer_idx, kv_cache_2add)
      
     # Reshape outputs

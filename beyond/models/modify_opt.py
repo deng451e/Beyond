@@ -87,6 +87,7 @@ def modified_OPTDecoder_forward(
         causal_attention_mask = self._prepare_decoder_attention_mask(
             attention_mask, input_shape, inputs_embeds, past_key_values_length
         )
+ 
         pos_embeds = self.embed_positions(attention_mask, past_key_values_length)
 
         if self.project_in is not None:
@@ -282,7 +283,7 @@ def modified_opt_attention_forward(
         attn_weights = attn_weights - max_scores
          
         if attention_mask is not None: 
-            
+          
             attn_weights  = attn_weights  + attention_mask 
             attn_weights = torch.max(attn_weights, torch.tensor(torch.finfo(attn_weights.dtype).min, device=attn_weights.device))
         

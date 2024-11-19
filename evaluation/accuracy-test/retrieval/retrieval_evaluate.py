@@ -14,6 +14,8 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 from typing import Dict, Tuple, Optional
+import logging
+logger = logging.getLogger(__name__)
 
 # from MoA.models.interface import update_model_function
 # from MoA.attention.set import set_static_attention_lut
@@ -43,13 +45,13 @@ def process_prompt(input, model, tokenizer, test_case: Dict, output_file: Option
 
     # print(f"Prompt length: {prompt_length}")
     
-    use_cache = True
+    use_cache = False
 
     device = getattr(model, "device", "cpu")
-    
+    print(input.input_ids.shape)
     output = model.generate(
         input.input_ids.to(device), 
-        max_new_tokens=100, 
+        max_new_tokens=10, 
         use_cache=use_cache,
         eos_token_id=stop_token_ids,
     )[0]
@@ -96,6 +98,7 @@ def process_prompt(input, model, tokenizer, test_case: Dict, output_file: Option
 if __name__ == "__main__":
     # define arguments
     parser = argparse.ArgumentParser()
+    parser.add_argument("--enable_beyond", action="store_true")
     parser.add_argument(
         "--model_name", type=str, default="lmsys/vicuna-7b-v1.5-16k", help="Path of the model"
     )
@@ -200,7 +203,41 @@ if __name__ == "__main__":
         torch_dtype=dtype,
     ).eval()
  
-    
+    KVCache_manager = None
+    ##############################
+    #          beyond            #
+    ##############################
+    if args.enable_beyond:
+        if os.path.exists("KV_cache_statics.log"): os.remove("KV_cache_statics.log")
+        logging.basicConfig(filename='KV_cache_statics.log', level=logging.INFO)  
+        from beyond.models.modify_opt import modify_opt_attention
+        from beyond.KVcache_manager import KVCache_manager_
+        if "llama" in model.config.model_type:
+            from beyond.models.modify_llama import modify_llama_attention as modify_attention
+        elif "opt" in model.config.model_type:
+            from beyond.models.modify_opt import modify_opt_attention as modify_attention
+        elif "gpt_neox" in model.config.model_type:
+            from beyond.models.modify_gptNeox import modify_GPTNeoX_attention as modify_attention
+
+        config = model.config 
+        KVCache_manager = KVCache_manager_(
+            start_size=4,
+            recent_size=400,
+            k_seq_dim=2,
+            v_seq_dim=2,
+            head_dim=config.hidden_size//config.num_attention_heads,
+            num_heads=config.num_attention_heads,
+            num_layers=config.num_hidden_layers,
+            gpu_cache_max=20000,
+            cpu_attn_size=2000000,
+            gpu_cache_device="cuda",
+        )
+        # if args.config_file_path:
+        #     print(f"Loading KV manager from {args.config_file_path} ...")
+        #     KVCache_manager = set_kv_manager_config(KVCache_manager,args.config_file_path)
+        KVCache_manager.print_coverage()
+        modify_attention(model,KVCache_manager)
+
 
     if model.generation_config.pad_token_id is None:
         model.generation_config.pad_token_id = tokenizer.pad_token_id
@@ -267,7 +304,7 @@ if __name__ == "__main__":
         # start test
         for i, data in enumerate(dataset):
             pbar.update(1)
-            print(f"++++++++++++++++++++{i}++++++++++++++++++++")
+            print(f"++++++++++++++++++++{len(data)}++++++++++++++++++++")
             prompt, stop_token_ids = generate_input(data, tokenizer, model_name)
 
             # check whether tokenized_len key is in data

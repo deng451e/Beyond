@@ -33,7 +33,7 @@ def generate_input(test_case: Dict, tokenizer, model_name_or_path: str) -> Tuple
     conv.append_message(conv.roles[1], None)
     prompt = conv.get_prompt()
     stop_token_ids = conv.stop_token_ids
-
+    print(prompt)
     return prompt, stop_token_ids
 
 def process_prompt(input, model, tokenizer, test_case: Dict, output_file: Optional[str] = None, idx: int = 0, stop_token_ids: Optional[list] = None) -> Tuple[bool, int, str]:
@@ -256,29 +256,29 @@ if __name__ == "__main__":
 
         # process bar
         pbar = tqdm(total=len(dataset)-1, position=1)
-
-
+   
         # start test
         for i, data in enumerate(dataset):
             pbar.update(1)
-
+             
             prompt, stop_token_ids = generate_input(data, tokenizer, model_name)
-           
+            
+             
             # check whether tokenized_len key is in data
             if 'tokenized_len' in data:
                 prompt_length = data['tokenized_len']
                 current_length_level = int((prompt_length - 1) // token_interval) + 1
                 if (current_length_level not in length_level):
                     continue
-
+           
             input = tokenizer(prompt, return_tensors="pt")
-
+            
             # check length and record
             prompt_length = input.input_ids.shape[-1] # the length of tokenized prompt
             current_length_level = int((prompt_length - 1) // token_interval) + 1
             current_position_level = floor((float(data['key_id']) * inverse_position_interval / float(data['num_lines'])))
-            print(current_length_level ,length_level)
-            # print('+++++++++++++++++++++++++++++++++++++++')
+             
+            
             # if (current_length_level not in length_level):
             #     print("skip")
             #     continue
@@ -288,7 +288,7 @@ if __name__ == "__main__":
             # if meshgrid_count[current_length_level, current_position_level] > test_num_bound:
             #     print("skip")
             #     continue
-
+            
             # retrieval test
             is_correct, summary = process_prompt(input, model, tokenizer, data, stop_token_ids=stop_token_ids)
             
@@ -300,13 +300,13 @@ if __name__ == "__main__":
             result_dict['summary'].append(summary)
             result_dict['num_lines'].append(data['num_lines'])
             result_dict['key_id'].append(data['key_id'])
-            result_dict['length_level'].append(length_level_interval[current_length_level])
-            result_dict['context_length'].append(context_length)
+            # result_dict['length_level'].append(length_level_interval[current_length_level])
+            # result_dict['context_length'].append(context_length)
 
         # save and visualize
-        df = pd.DataFrame(result_dict)
+        # df = pd.DataFrame(result_dict)
         print(result_dict)
-        df = df[df['context_length'] == context_length]
+        #df = df[df['context_length'] == context_length]
         
         
         

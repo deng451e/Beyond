@@ -263,7 +263,7 @@ if __name__ == "__main__":
         pbar = tqdm(total=len(dataset)-1, position=1)
 
 
-        dataset = dataset[:len(dataset)//2]
+        # dataset = dataset[:len(dataset)//2]
         # start test
         for i, data in enumerate(dataset):
             pbar.update(1)

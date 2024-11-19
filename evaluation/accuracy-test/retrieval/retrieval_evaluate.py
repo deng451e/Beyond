@@ -23,6 +23,10 @@ logger = logging.getLogger(__name__)
 # from MoA.models.llama.h2o import convert_kvcache_llama_heavy_recent
 # from MoA.dataset.long_eval.visualize import plot_correct_rate_heatmap_input_length_position, plot_data_count_heatmap_input_length_position
 
+
+
+
+
 def generate_input(test_case: Dict, tokenizer, model_name_or_path: str) -> Tuple[str, int]:
     """
     Generate the prompt and calculate its length.
@@ -38,26 +42,87 @@ def generate_input(test_case: Dict, tokenizer, model_name_or_path: str) -> Tuple
 
     return prompt, stop_token_ids
 
-def process_prompt(input, model, tokenizer, test_case: Dict, output_file: Optional[str] = None, idx: int = 0, stop_token_ids: Optional[list] = None) -> Tuple[bool, int, str]:
+def process_prompt(input, model, tokenizer, test_case: Dict, output_file: Optional[str] = None, idx: int = 0, stop_token_ids: Optional[list] = None,enable_beyond=False) -> Tuple[bool, int, str]:
     expected_number: int = test_case["value"]
 
     prompt_length = input.input_ids.shape[-1]
 
     # print(f"Prompt length: {prompt_length}")
     
-    use_cache = False
+    use_cache=False if enable_beyond else True
 
     device = getattr(model, "device", "cpu")
-    print(input.input_ids.shape)
-    output = model.generate(
-        input.input_ids.to(device), 
-        max_new_tokens=10, 
-        use_cache=use_cache,
-        eos_token_id=stop_token_ids,
-    )[0]
+    
+    input.input_ids =input.input_ids[:,:500]
+    input.attention_mask=input.attention_mask[:,:500]
+
+    print(input.input_ids.shape,input.attention_mask.shape)
+    # output = model.generate(
+    #     input.input_ids.to(device), 
+    #     max_new_tokens=100, 
+    #     use_cache=use_cache,
+    #     eos_token_id=stop_token_ids,
+    # )[0]
+    past_key_values=None
+    outputs = model(
+        input_ids=input.input_ids.to(device),
+        past_key_values=past_key_values,
+        use_cache=True,
+    )
+    past_key_values = outputs.past_key_values if not  enable_beyond else None 
+    pred_token_idx = outputs.logits[:, -1, :].argmax(dim=-1).unsqueeze(1)
+    generated_ids = [pred_token_idx.item()]
+    pos = 0
+    # if enable_modify:
+          
+    #     KVCache_manager.copy_stream.synchronize()
+     
+    for _ in range(100 - 1):
+        outputs = model(
+            input_ids=pred_token_idx,
+            past_key_values=past_key_values,
+            use_cache=True,
+        )
+        if enable_beyond:
+            past_key_values = None 
+            
+        else:
+            past_key_values = outputs.past_key_values
+            
+         
+             
+        pred_token_idx = outputs.logits[:, -1, :].argmax(dim=-1).unsqueeze(1)
+        
+        generated_ids.append(pred_token_idx.item())
+        # generated_text = (
+        #     tokenizer.decode(
+        #         generated_ids,
+        #         skip_special_tokens=True,
+        #         clean_up_tokenization_spaces=True,
+        #         spaces_between_special_tokens=False,
+        #     )
+        #     .strip()
+        #     .split(" ")
+        # )
+      
+
+        # now = len(generated_text) - 1
+        # if now > pos:
+        #     print(" ".join(generated_text[pos:now]), end=" ", flush=True)
+        #     pos = now
+
+        if pred_token_idx == stop_token_ids:
+          
+            break
+    
+ 
+
+    ###########################################################
+
+    output = generated_ids
     output = output[prompt_length:]
     output = tokenizer.batch_decode([output], skip_special_tokens=True)[0]
-
+    
     # Matching the last digit of the model output
     response_number = re.findall("\d+", output)
     if response_number is not None and len(response_number) > 0:
@@ -214,6 +279,7 @@ if __name__ == "__main__":
         from beyond.KVcache_manager import KVCache_manager_
         if "llama" in model.config.model_type:
             from beyond.models.modify_llama import modify_llama_attention as modify_attention
+             
         elif "opt" in model.config.model_type:
             from beyond.models.modify_opt import modify_opt_attention as modify_attention
         elif "gpt_neox" in model.config.model_type:
@@ -222,7 +288,7 @@ if __name__ == "__main__":
         config = model.config 
         KVCache_manager = KVCache_manager_(
             start_size=4,
-            recent_size=400,
+            recent_size=1000,
             k_seq_dim=2,
             v_seq_dim=2,
             head_dim=config.hidden_size//config.num_attention_heads,
@@ -300,12 +366,12 @@ if __name__ == "__main__":
         pbar = tqdm(total=len(dataset)-1, position=1)
 
 
-        # dataset = dataset[:len(dataset)//2]
+       
         # start test
         for i, data in enumerate(dataset):
             pbar.update(1)
-            print(f"++++++++++++++++++++{len(data)}++++++++++++++++++++")
-            prompt, stop_token_ids = generate_input(data, tokenizer, model_name)
+           
+           
 
             # check whether tokenized_len key is in data
             if 'tokenized_len' in data:
@@ -314,8 +380,10 @@ if __name__ == "__main__":
                 if (current_length_level not in length_level):
                     continue
 
+                    
+            prompt, stop_token_ids = generate_input(data, tokenizer, model_name)
             input = tokenizer(prompt, return_tensors="pt")
-
+             
             # check length and record
             prompt_length = input.input_ids.shape[-1] # the length of tokenized prompt
             current_length_level = int((prompt_length - 1) // token_interval) + 1
@@ -328,9 +396,13 @@ if __name__ == "__main__":
             if meshgrid_count[current_length_level, current_position_level] > test_num_bound:
                 continue
 
+             
             # retrieval test
-            is_correct, summary = process_prompt(input, model, tokenizer, data, stop_token_ids=stop_token_ids)
-            
+            is_correct, summary = process_prompt(input, model, tokenizer, data, stop_token_ids=stop_token_ids,enable_beyond=args.enable_beyond)
+          
+            if args.enable_beyond: 
+                print('========')
+                KVCache_manager.clear_kv_cache()
             # record
             pbar.write(f"Prompt_Length: {prompt_length}, Correct: {is_correct}, {summary}")
             result_dict['id'].append(i)

@@ -262,12 +262,12 @@ if __name__ == "__main__":
         # process bar
         pbar = tqdm(total=len(dataset)-1, position=1)
 
-        
 
+        dataset = dataset[:len(dataset)//2]
         # start test
         for i, data in enumerate(dataset):
             pbar.update(1)
-
+            print(f"++++++++++++++++++++{i}++++++++++++++++++++")
             prompt, stop_token_ids = generate_input(data, tokenizer, model_name)
 
             # check whether tokenized_len key is in data

@@ -33,7 +33,7 @@ def generate_input(test_case: Dict, tokenizer, model_name_or_path: str) -> Tuple
     conv.append_message(conv.roles[1], None)
     prompt = conv.get_prompt()
     stop_token_ids = conv.stop_token_ids
-    print(prompt)
+
     return prompt, stop_token_ids
 
 def process_prompt(input, model, tokenizer, test_case: Dict, output_file: Optional[str] = None, idx: int = 0, stop_token_ids: Optional[list] = None) -> Tuple[bool, int, str]:
@@ -104,14 +104,19 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dtype", type=str, choices=["fp16", "fp32", "bf16"], default="fp16"
     )
-    # parser.add_argument(
-    #     "--lut_path",
-    #     nargs="+",
-    #     type=str,
-    #     help="List of paths to load efficient attention lut",
-    # )
+    parser.add_argument(
+        "--lut_path",
+        nargs="+",
+        type=str,
+        help="List of paths to load efficient attention lut",
+    )
     parser.add_argument('--not_permute_head', action='store_true')
-    
+    parser.add_argument(
+        "--use_flash_attention",
+        action="store_true",
+        default=False,
+        help="Whether to use flash attention",
+    )
     parser.add_argument(
         "--use_streamingLLM",
         action="store_true",
@@ -160,8 +165,8 @@ if __name__ == "__main__":
     parser.add_argument('--dataset_path', type=str, default=None)
     args = parser.parse_args()
 
-    # args.use_flash_attention = True if (args.lut_path is None) and (not args.use_streamingLLM) and (not args.h2o) else args.use_flash_attention # noqa: if lut_path is not None, use flash attention
-    # print("using flash attention", args.use_flash_attention)
+    args.use_flash_attention = True if (args.lut_path is None) and (not args.use_streamingLLM) and (not args.h2o) else args.use_flash_attention # noqa: if lut_path is not None, use flash attention
+    print("using flash attention", args.use_flash_attention)
 
     # load tokenizer
     if args.tokenizer_name is None:
@@ -175,7 +180,7 @@ if __name__ == "__main__":
 
     # define model config
     config = AutoConfig.from_pretrained(args.model_name)
-   
+     
 
     # load model
     if args.dtype == 'fp16':
@@ -191,10 +196,12 @@ if __name__ == "__main__":
         args.model_name,
         config=config,
         device_map="auto",
-    
+        
         torch_dtype=dtype,
     ).eval()
  
+    
+
     if model.generation_config.pad_token_id is None:
         model.generation_config.pad_token_id = tokenizer.pad_token_id
 
@@ -238,16 +245,14 @@ if __name__ == "__main__":
     test_num_bound = args.test_num
 
     # noqa: random sample 100 items from the dataset
-    dataset = dataset.shuffle(seed=42).select(range(1))
-     
+    # dataset = dataset.shuffle(seed=42).select(range(50))
+    
     context_length_range = [0.0]
     global_size = 4
 
     os.makedirs(args.output_dir, exist_ok=True)
 
     for context_length in tqdm(context_length_range, position=0):
-        
-        
         # initialize everything
         now = datetime.now()
         datetime_str = now.strftime("%Y%m%d-%H%M")
@@ -256,39 +261,36 @@ if __name__ == "__main__":
 
         # process bar
         pbar = tqdm(total=len(dataset)-1, position=1)
-   
+
+        
+
         # start test
         for i, data in enumerate(dataset):
             pbar.update(1)
-             
+
             prompt, stop_token_ids = generate_input(data, tokenizer, model_name)
-            
-             
+
             # check whether tokenized_len key is in data
             if 'tokenized_len' in data:
                 prompt_length = data['tokenized_len']
                 current_length_level = int((prompt_length - 1) // token_interval) + 1
                 if (current_length_level not in length_level):
                     continue
-           
+
             input = tokenizer(prompt, return_tensors="pt")
-            
+
             # check length and record
             prompt_length = input.input_ids.shape[-1] # the length of tokenized prompt
             current_length_level = int((prompt_length - 1) // token_interval) + 1
             current_position_level = floor((float(data['key_id']) * inverse_position_interval / float(data['num_lines'])))
-             
-            
-            # if (current_length_level not in length_level):
-            #     print("skip")
-            #     continue
-            # # current input length now become a index 
-            # current_length_level = length_level.index(current_length_level)
-            # meshgrid_count[current_length_level, current_position_level] += 1
-            # if meshgrid_count[current_length_level, current_position_level] > test_num_bound:
-            #     print("skip")
-            #     continue
-            
+            if (current_length_level not in length_level):
+                continue
+            # current input length now become a index 
+            current_length_level = length_level.index(current_length_level)
+            meshgrid_count[current_length_level, current_position_level] += 1
+            if meshgrid_count[current_length_level, current_position_level] > test_num_bound:
+                continue
+
             # retrieval test
             is_correct, summary = process_prompt(input, model, tokenizer, data, stop_token_ids=stop_token_ids)
             
@@ -300,17 +302,15 @@ if __name__ == "__main__":
             result_dict['summary'].append(summary)
             result_dict['num_lines'].append(data['num_lines'])
             result_dict['key_id'].append(data['key_id'])
-            # result_dict['length_level'].append(length_level_interval[current_length_level])
-            # result_dict['context_length'].append(context_length)
+            result_dict['length_level'].append(length_level_interval[current_length_level])
+            result_dict['context_length'].append(context_length)
 
         # save and visualize
-        # df = pd.DataFrame(result_dict)
-        print(result_dict)
-        #df = df[df['context_length'] == context_length]
-        
-        
-        
-        # output_dir = args.output_dir
+        df = pd.DataFrame(result_dict)
+        df = df[df['context_length'] == context_length]
+        print(df)
+
+        output_dir = args.output_dir
         # try:
         #     df.to_csv(os.path.join(output_dir, f"test_result_{datetime_str}.csv"), index=False)
         #     # plot everything
@@ -327,12 +327,12 @@ if __name__ == "__main__":
     print(f"Finish at {datetime_str}")
 
 
-    # # visualize and save the results
-    # df = pd.DataFrame(result_dict)
-    # print(df)
+    # visualize and save the results
+    df = pd.DataFrame(result_dict)
+    print(df)
 
-    # correct_rate = df['is_correct'].sum() / len(df)
-    # print(f"The overall correct rate is {correct_rate:.4f}")
+    correct_rate = df['is_correct'].sum() / len(df)
+    print(f"The overall correct rate is {correct_rate:.4f}")
 
     # print(f"Saving the result to {args.output_dir}")
     # output_dir = args.output_dir
@@ -342,4 +342,4 @@ if __name__ == "__main__":
     # plot_correct_rate_heatmap_input_length_position(df, os.path.join(output_dir, f"correct_rate_heatmap_{datetime_str}.png"))
     # plot_data_count_heatmap_input_length_position(df, os.path.join(output_dir, f"data_point_distribution_heatmap.png"))
 
-    # print("Retrieval Visualization Finished")
+    print("Retrieval Visualization Finished")

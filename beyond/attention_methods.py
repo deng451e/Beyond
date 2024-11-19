@@ -1,9 +1,10 @@
 import torch  
+import torch.nn.functional as F
 import flashinfer 
 import argparse
 import time 
 from beyond.utils import *
- 
+
  
 import logging 
 
@@ -14,7 +15,56 @@ logger = logging.getLogger(__name__)
             
  
  
+             
+class block_selection_:
 
+    def __init__(self,blk_size,num_layers ):
+        """
+        ICML 2024 Quest 
+        """
+        self.blk_sizes = [blk_size for _ in range(num_layers)]
+        
+   
+    def __call__(self,q,blk_dim_min_max, blk_idx,kv_cache,idx,topk):
+        blk_size = self.blk_sizes[idx]
+        k_min,k_max = blk_dim_min_max #b,h,blk_num,d
+        b,h, blk_num,d = k_min.size()
+        k_cache,v_cache = kv_cache 
+        score_min =  torch.matmul(q , k_min.transpose(2, 3) ) #b,h,1,blk_num
+        score_max =  torch.matmul(q , k_max.transpose(2, 3) ) #b,h,1,blk_num
+        attn_weights = torch.where(score_max>score_min,score_max,score_min)
+
+
+        indices = torch.topk(attn_weights , topk,dim=-1)[1] #b,h,1,topk
+        
+        selected_v = torch.zeros(b,h,blk_size*topk,d).half()
+        selected_k = torch.zeros(b,h,blk_size*topk,d).half()
+        
+        for b_idx  in range(b):
+            for h_idx in range(h):
+                index_holder = indices[b_idx,h_idx,0,:]
+             
+                fetch_idx = torch.cat([torch.arange(blk_idx[ind][0],blk_idx[ind][1])  for ind in index_holder],dim=0)
+                selected_k[b_idx,h_idx,:fetch_idx.size(-1),:] = k_cache[b_idx,h_idx,fetch_idx,:]
+                selected_v[b_idx,h_idx,:fetch_idx.size(-1),:] = v_cache[b_idx,h_idx,fetch_idx,:]
+                 
+                 
+        return selected_k,selected_v
+        
+ 
+
+    # indices = indices.reshape(b*h,-1).permute(1,0)
+     
+    # ind = indices * b*h + torch.arange(b*h,device=k_cache.device)[None, :]
+    
+    # v_cache  = v_cache.permute(2,0,1,3).reshape(-1,d)
+    # k_cache  = k_cache.permute(2,0,1,3).reshape(-1,d)
+
+    # selected_v = F.embedding(ind, v_cache)
+    # selected_k = F.embedding(ind, k_cache)
+
+    # selected_v = selected_v.permute(1,0,2).reshape(b,h,topk,-1)
+    # selected_k = selected_k.permute(1,0,2).reshape(b,h,topk,-1)
  
 # logSum attention methods 
 class mha_lse_methods:
@@ -157,7 +207,8 @@ def test_correctness(args,log):
     seq_len = args.seq_len
     q_len = args.q_len
     head_dim = hidden_size//num_heads
-     
+    topk = args.topk
+    blk_size=args.blk_size
    
     assert  (start+recent<=seq_len),  f"start+recent greater than seq_len..."
      
@@ -214,8 +265,22 @@ def test_correctness(args,log):
           
     v_reference_nomal,_ = mha_lse(q_ref.cpu() ,k_ref.cpu(),v_ref.cpu())  # b s h d 
     v_reference_nomal = v_reference_nomal.reshape(-1,batch_size,num_heads,head_dim).permute(1,0,2,3)
+    print(log)
+    
+    kv_cache = (k_cache,v_cache)
      
-
+    k_blk_min = torch.randn(batch_size,num_heads,seq_len//blk_size,head_dim, device='cpu').half()
+    k_blk_max = torch.randn(batch_size,num_heads,seq_len//blk_size,head_dim, device='cpu').half()
+ 
+    blk_idx = [(start,start+blk_size) for start in range(0,seq_len,blk_size)]
+ 
+    blk_dim_min_max = (k_blk_min,k_blk_max)
+    block_selection = block_selection_(blk_size,32)
+    st = time.time()
+    selectd_k,selected_v  = block_selection(q.cpu(),blk_dim_min_max, blk_idx,kv_cache,0,topk)
+ 
+    _,_ = mha_lse(q.cpu(),selectd_k,selected_v)
+    print(f"Block selection + attention time: {time.time()-st}, ")
     #####################
     #   CPU Attention   # 
     #####################
@@ -223,6 +288,7 @@ def test_correctness(args,log):
     k_cpu = torch.cat([slice(k_cache,start,seq_len-recent),k.cpu()],dim=k_dim)
     v_cpu = torch.cat([slice(v_cache,start,seq_len-recent),v.cpu()],dim=k_dim)
      
+
     if args.RoPE: 
         q_cpu = apply_rotary_pos_emb_single(q_cpu, cos, sin, torch.arange(kv_len-q_len,kv_len).unsqueeze(0))
         position_ids = torch.cat([  
@@ -231,7 +297,7 @@ def test_correctness(args,log):
                 ],dim=0).unsqueeze(0)
         k_cpu = apply_rotary_pos_emb_single(k_cpu, cos, sin,position_ids)
      
-    print(log)
+     
     st = time.time()
     va,sa = mha_lse(q_cpu,k_cpu,v_cpu)
     print(f"CPU attention length: {seq_len-start-recent}, compute time: {time.time()-st}, ")
@@ -270,19 +336,21 @@ if __name__ == "__main__":
     
     
     parser.add_argument("--start_size", type=int, default=4)
-    parser.add_argument("--recent_size", type=int, default=50) 
-    parser.add_argument("--seq_len", type=int, default=55)
+    parser.add_argument("--recent_size", type=int, default=1000) 
+    parser.add_argument("--seq_len", type=int, default=10000)
     parser.add_argument("--q_len", type=int, default=1)
+    parser.add_argument("--topk", type=int, default=10)
+    parser.add_argument("--blk_size", type=int, default=100)
 
     # model config 
-    parser.add_argument("--num_heads", type=int, default=40)
-    parser.add_argument("--hidden_size", type=int, default=5120)
+    parser.add_argument("--num_heads", type=int, default=32)
+    parser.add_argument("--hidden_size", type=int, default=4096)
     parser.add_argument("--model_type", type=str, default="opt")
     parser.add_argument("--RoPE", type=bool, default=True )
     
     # test config 
     parser.add_argument("--repeat", type=int, default=10)
-    parser.add_argument("--batch_size", type=int, default=5)
+    parser.add_argument("--batch_size", type=int, default=1)
      
     args = parser.parse_args()
     test_correctness(args,"")

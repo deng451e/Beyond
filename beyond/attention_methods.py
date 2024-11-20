@@ -51,27 +51,13 @@ class block_selection_:
                  
         return selected_k,selected_v
         
- 
-
-    # indices = indices.reshape(b*h,-1).permute(1,0)
-     
-    # ind = indices * b*h + torch.arange(b*h,device=k_cache.device)[None, :]
-    
-    # v_cache  = v_cache.permute(2,0,1,3).reshape(-1,d)
-    # k_cache  = k_cache.permute(2,0,1,3).reshape(-1,d)
-
-    # selected_v = F.embedding(ind, v_cache)
-    # selected_k = F.embedding(ind, k_cache)
-
-    # selected_v = selected_v.permute(1,0,2).reshape(b,h,topk,-1)
-    # selected_k = selected_k.permute(1,0,2).reshape(b,h,topk,-1)
- 
+  
 # logSum attention methods 
 class mha_lse_methods:
     def __init__(self,methods ):
         self.methods = methods
         
-    def __call__(self, q,k,v,attention_mask=None):
+    def __call__(self, q,k,v,attention_mask=None,alpha=1):
         
         #shape: b,h,s,d
         batch_size,num_heads,qs,head_dim = q.size()
@@ -80,7 +66,7 @@ class mha_lse_methods:
         k = k.permute(0,1,3,2).reshape(batch_size  * num_heads, head_dim, -1) # bh,d,s
         v = v.reshape(batch_size  * num_heads, -1, head_dim) # bh,s,d
         attn_weights = torch.bmm(q,k)   # bh,qs,s 
-
+       
         
         max_scores, _ = attn_weights.max(dim=-1, keepdim=True) 
         attn_weights  = attn_weights - max_scores
@@ -102,21 +88,23 @@ class mha_lse_methods:
                     mask_value = torch.tensor(mask_value, dtype=attn_weights.dtype).to( attn_weights.device)
                     attn_weights[:,:,-qs:] = torch.where(attention_mask, attn_weights[:,:,-qs:], mask_value)
                 case "flexgen-opt":
-                    print(attention_mask.shape,attn_weights.shape)
+                    
                      
                     attn_weights = torch.where(attention_mask, attn_weights[:,:,-qs:], -1e4)
 
          
         exp_scores = torch.exp(attn_weights).to(v.dtype)
         sum_exp_scores = exp_scores.sum(dim=-1, keepdim=True)
-        log_sum = (torch.log(sum_exp_scores)  + max_scores) * torch.tensor(1.4427) 
+        log_sum = (torch.log(sum_exp_scores) + max_scores).float() * torch.tensor(1.4427,dtype=torch.float32)  
         attn_weights = exp_scores / sum_exp_scores 
         #attn_weights = attn_weights.to(v.dtype)
+        
         value  = torch.bmm(attn_weights, v).permute(1,0,2).half().contiguous()
-        log_sum = log_sum.squeeze(-1).permute(1,0).contiguous().float() 
+       
+        log_sum = log_sum.squeeze(-1).permute(1,0).contiguous() 
         
        
-        if check_tensor_device(q,'cpu'):  return  value.pin_memory(),log_sum.pin_memory()
+        if check_tensor_device(q,'cpu'):  return  (value*torch.tensor(alpha) ).pin_memory(),(log_sum).pin_memory()
         if check_tensor_device(q,'cuda'): return  value, log_sum
             
     
@@ -335,17 +323,17 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     
     
-    parser.add_argument("--start_size", type=int, default=4)
-    parser.add_argument("--recent_size", type=int, default=1000) 
-    parser.add_argument("--seq_len", type=int, default=10000)
+    parser.add_argument("--start_size", type=int, default=50)
+    parser.add_argument("--recent_size", type=int, default=3800) 
+    parser.add_argument("--seq_len", type=int, default=3851)
     parser.add_argument("--q_len", type=int, default=1)
-    parser.add_argument("--topk", type=int, default=10)
+    parser.add_argument("--topk", type=int, default=3)
     parser.add_argument("--blk_size", type=int, default=100)
 
     # model config 
     parser.add_argument("--num_heads", type=int, default=32)
     parser.add_argument("--hidden_size", type=int, default=4096)
-    parser.add_argument("--model_type", type=str, default="opt")
+    parser.add_argument("--model_type", type=str, default="llama")
     parser.add_argument("--RoPE", type=bool, default=True )
     
     # test config 

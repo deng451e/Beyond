@@ -42,6 +42,7 @@ def generate_input(test_case: Dict, tokenizer, model_name_or_path: str) -> Tuple
 
     return prompt, stop_token_ids
 
+@torch.no_grad()
 def process_prompt(input, model, tokenizer, test_case: Dict, output_file: Optional[str] = None, idx: int = 0, stop_token_ids: Optional[list] = None,enable_beyond=False) -> Tuple[bool, int, str]:
     expected_number: int = test_case["value"]
 
@@ -53,10 +54,11 @@ def process_prompt(input, model, tokenizer, test_case: Dict, output_file: Option
 
     device = getattr(model, "device", "cpu")
     
-    input.input_ids =input.input_ids[:,:500]
-    input.attention_mask=input.attention_mask[:,:500]
-
-    print(input.input_ids.shape,input.attention_mask.shape)
+  
+    input_ids =input.input_ids#[:,:2000]
+    input.attention_mask=input.attention_mask[:,:2000]
+    
+      
     # output = model.generate(
     #     input.input_ids.to(device), 
     #     max_new_tokens=100, 
@@ -65,14 +67,16 @@ def process_prompt(input, model, tokenizer, test_case: Dict, output_file: Option
     # )[0]
     past_key_values=None
     outputs = model(
-        input_ids=input.input_ids.to(device),
+        input_ids=input_ids.to(device),
         past_key_values=past_key_values,
         use_cache=True,
     )
     past_key_values = outputs.past_key_values if not  enable_beyond else None 
     pred_token_idx = outputs.logits[:, -1, :].argmax(dim=-1).unsqueeze(1)
-    generated_ids = [pred_token_idx.item()]
+    generated_ids = [pred_token_idx.item() ]
     pos = 0
+    
+     
     # if enable_modify:
           
     #     KVCache_manager.copy_stream.synchronize()
@@ -88,12 +92,13 @@ def process_prompt(input, model, tokenizer, test_case: Dict, output_file: Option
             
         else:
             past_key_values = outputs.past_key_values
-            
+            # print(pred_token_idx.shape,past_key_values[0][0].shape,past_key_values[0][0].dtype)
          
              
         pred_token_idx = outputs.logits[:, -1, :].argmax(dim=-1).unsqueeze(1)
         
-        generated_ids.append(pred_token_idx.item())
+        generated_ids.append(pred_token_idx.item() )
+         
         # generated_text = (
         #     tokenizer.decode(
         #         generated_ids,
@@ -120,7 +125,7 @@ def process_prompt(input, model, tokenizer, test_case: Dict, output_file: Option
     ###########################################################
 
     output = generated_ids
-    output = output[prompt_length:]
+    # output = output[prompt_length:]
     output = tokenizer.batch_decode([output], skip_special_tokens=True)[0]
     
     # Matching the last digit of the model output
@@ -179,18 +184,8 @@ if __name__ == "__main__":
         help="List of paths to load efficient attention lut",
     )
     parser.add_argument('--not_permute_head', action='store_true')
-    parser.add_argument(
-        "--use_flash_attention",
-        action="store_true",
-        default=False,
-        help="Whether to use flash attention",
-    )
-    parser.add_argument(
-        "--use_streamingLLM",
-        action="store_true",
-        default=False,
-        help="Whether to use streaming LLM",
-    )
+    
+  
     parser.add_argument(
         "--band_size", default=2044, type=int
     )
@@ -232,9 +227,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--dataset_path', type=str, default=None)
     args = parser.parse_args()
-
-    args.use_flash_attention = True if (args.lut_path is None) and (not args.use_streamingLLM) and (not args.h2o) else args.use_flash_attention # noqa: if lut_path is not None, use flash attention
-    print("using flash attention", args.use_flash_attention)
+ 
 
     # load tokenizer
     if args.tokenizer_name is None:

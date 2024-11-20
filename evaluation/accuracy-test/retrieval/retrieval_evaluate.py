@@ -17,7 +17,7 @@ from typing import Dict, Tuple, Optional
 import logging
 logger = logging.getLogger(__name__)
  
-
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
 def generate_input(test_case: Dict, tokenizer, model_name_or_path: str) -> Tuple[str, int]:
     """
@@ -47,17 +47,10 @@ def process_prompt(input, model, tokenizer, test_case: Dict, output_file: Option
     device = getattr(model, "device", "cpu")
     
   
-    input_ids =input.input_ids # [:,:2000]
-  
-    
-      
-    # output = model.generate(
-    #     input.input_ids.to(device), 
-    #     max_new_tokens=100, 
-    #     use_cache=use_cache,
-    #     eos_token_id=stop_token_ids,
-    # )[0]
+    input_ids =input.input_ids[:,:5000]
     past_key_values=None
+ 
+    
     outputs = model(
         input_ids=input_ids.to(device),
         past_key_values=past_key_values,
@@ -73,7 +66,7 @@ def process_prompt(input, model, tokenizer, test_case: Dict, output_file: Option
           
     #     KVCache_manager.copy_stream.synchronize()
      
-    for _ in range(200 - 1):
+    for _ in range(100 - 1):
         outputs = model(
             input_ids=pred_token_idx,
             past_key_values=past_key_values,
@@ -90,24 +83,7 @@ def process_prompt(input, model, tokenizer, test_case: Dict, output_file: Option
         pred_token_idx = outputs.logits[:, -1, :].argmax(dim=-1).unsqueeze(1)
         
         generated_ids.append(pred_token_idx.item() )
-         
-        # generated_text = (
-        #     tokenizer.decode(
-        #         generated_ids,
-        #         skip_special_tokens=True,
-        #         clean_up_tokenization_spaces=True,
-        #         spaces_between_special_tokens=False,
-        #     )
-        #     .strip()
-        #     .split(" ")
-        # )
-      
-
-        # now = len(generated_text) - 1
-        # if now > pos:
-        #     print(" ".join(generated_text[pos:now]), end=" ", flush=True)
-        #     pos = now
-
+          
         if pred_token_idx == stop_token_ids:
           
             break
@@ -119,7 +95,7 @@ def process_prompt(input, model, tokenizer, test_case: Dict, output_file: Option
     output = generated_ids
     # output = output[prompt_length:]
     output = tokenizer.batch_decode([output], skip_special_tokens=True)[0]
-    
+    print(output)
     # Matching the last digit of the model output
     response_number = re.findall("\d+", output)
     if response_number is not None and len(response_number) > 0:
@@ -161,9 +137,8 @@ if __name__ == "__main__":
     # define arguments
     parser = argparse.ArgumentParser()
     parser.add_argument("--enable_beyond", action="store_true")
-    parser.add_argument(
-        "--model_name", type=str, default="lmsys/vicuna-7b-v1.5-16k", help="Path of the model"
-    )
+     
+    parser.add_argument("--model_name", type=str, default="lmsys/vicuna-7b-v1.5-16k" )
     parser.add_argument(
         "--tokenizer_name", type=str, default=None)
     parser.add_argument(
@@ -279,7 +254,7 @@ if __name__ == "__main__":
             head_dim=config.hidden_size//config.num_attention_heads,
             num_heads=config.num_attention_heads,
             num_layers=config.num_hidden_layers,
-            gpu_cache_max=20000,
+            gpu_cache_max=200000,
             cpu_attn_size=2000000,
             gpu_cache_device="cuda",
         )

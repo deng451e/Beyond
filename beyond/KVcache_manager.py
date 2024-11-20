@@ -53,7 +53,10 @@ class KVCache_manager_:
         self.blk_idx = [[] for _ in range(num_layers)] 
         self.blk_dim_min_max = [[] for _ in range(num_layers)] 
         
-          
+    def clear_kv_cache(self,):
+        self.kv_cache = [[None,None,None,None] for _ in range( self.num_layers )] 
+        print('all kv cacche has been cleared')
+
 
     def __call__(self,idx):
         assert 0<=idx<self.num_layers, f"invalid layer index {idx}"

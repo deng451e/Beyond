@@ -16,15 +16,7 @@ from datetime import datetime
 from typing import Dict, Tuple, Optional
 import logging
 logger = logging.getLogger(__name__)
-
-# from MoA.models.interface import update_model_function
-# from MoA.attention.set import set_static_attention_lut
-# from MoA.models.llama.modeling_llama import LlamaModel_use_streamingllm_attention
-# from MoA.models.llama.h2o import convert_kvcache_llama_heavy_recent
-# from MoA.dataset.long_eval.visualize import plot_correct_rate_heatmap_input_length_position, plot_data_count_heatmap_input_length_position
-
-
-
+ 
 
 
 def generate_input(test_case: Dict, tokenizer, model_name_or_path: str) -> Tuple[str, int]:
@@ -56,7 +48,7 @@ def process_prompt(input, model, tokenizer, test_case: Dict, output_file: Option
     
   
     input_ids =input.input_ids#[:,:2000]
-    input.attention_mask=input.attention_mask[:,:2000]
+  
     
       
     # output = model.generate(
@@ -81,7 +73,7 @@ def process_prompt(input, model, tokenizer, test_case: Dict, output_file: Option
           
     #     KVCache_manager.copy_stream.synchronize()
      
-    for _ in range(100 - 1):
+    for _ in range(200 - 1):
         outputs = model(
             input_ids=pred_token_idx,
             past_key_values=past_key_values,
@@ -195,9 +187,9 @@ if __name__ == "__main__":
     parser.add_argument(
         '--h2o', action='store_true', help='Use H2O attention'
     )
-
-    parser.add_argument('--recent', type=int, default=1024, help='Recent budget ratio')
-    parser.add_argument('--heavy', type=int, default=1024, help='Heavy budget ratio')
+  
+    parser.add_argument('--start_size', type=int, default=4, help='Recent budget ratio')
+    parser.add_argument('--recent_size', type=int, default=2000, help='Heavy budget ratio')
 
     parser.add_argument(
         "--output_dir",
@@ -280,8 +272,8 @@ if __name__ == "__main__":
 
         config = model.config 
         KVCache_manager = KVCache_manager_(
-            start_size=4,
-            recent_size=1000,
+            start_size=args.start_size,
+            recent_size=args.recent_size,
             k_seq_dim=2,
             v_seq_dim=2,
             head_dim=config.hidden_size//config.num_attention_heads,
@@ -394,7 +386,7 @@ if __name__ == "__main__":
             is_correct, summary = process_prompt(input, model, tokenizer, data, stop_token_ids=stop_token_ids,enable_beyond=args.enable_beyond)
           
             if args.enable_beyond: 
-                print('========')
+           
                 KVCache_manager.clear_kv_cache()
             # record
             pbar.write(f"Prompt_Length: {prompt_length}, Correct: {is_correct}, {summary}")

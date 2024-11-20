@@ -84,7 +84,7 @@ def modified_GPTNeoX_attention_forward(
     if k_cache_gpu is not None:
 
         
-        if self.attn_layer_idx==35:
+        if self.attn_layer_idx==0:
             info = f"GPU cache size: {k_cache_gpu.size(-2)}"
             if k_cache_cpu is not None:  info +=  f" | CPU cache size: {k_cache_cpu.size(-2)}"
             logger.info(info)

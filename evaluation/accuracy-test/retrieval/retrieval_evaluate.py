@@ -47,7 +47,7 @@ def process_prompt(input, model, tokenizer, test_case: Dict, output_file: Option
     device = getattr(model, "device", "cpu")
     
   
-    input_ids =input.input_ids#[:,:2000]
+    input_ids =input.input_ids # [:,:2000]
   
     
       

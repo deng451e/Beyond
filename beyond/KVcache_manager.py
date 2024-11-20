@@ -54,6 +54,8 @@ class KVCache_manager_:
         self.blk_dim_min_max = [[] for _ in range(num_layers)] 
         
     def clear_kv_cache(self,):
+        self.blk_num       = [0 for _ in range( self.num_layers )] 
+        self.cpu_kv_flags  = [False for _ in range( self.num_layers )]   
         self.kv_cache = [[None,None,None,None] for _ in range( self.num_layers )] 
         print('all kv cacche has been cleared')
 

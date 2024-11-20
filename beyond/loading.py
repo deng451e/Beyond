@@ -111,7 +111,7 @@ def load_dataset_(dataset_path,cnt=100):
                 prompts += sample["turns"]
                 
         case "hakurei/open-instruct-v1":
-            
+            from datasets import load_dataset
             list_data = load_dataset(dataset_path)['train']
             # truncate datset size           
             
@@ -125,6 +125,7 @@ def load_dataset_(dataset_path,cnt=100):
                 if cnt==0:
                     break
         case "facebook/content_rephrasing":
+            from datasets import load_dataset
             list_data = load_dataset(dataset_path)['train']
             # truncate datset size           
             
@@ -142,28 +143,4 @@ def load_dataset_(dataset_path,cnt=100):
     return prompts,outputs
 
 
-
-########################
-# utils from infinigen
  
-def get_loaders(name, nsamples=128, seed=0, seqlen=2048, model=''):
-     
-    from transformers import LlamaTokenizer, AutoTokenizer
-    from datasets import load_dataset
-
-    if 'wikitext2' in name:
-        testdata = load_dataset('wikitext', 'wikitext-2-raw-v1', split='test')
-        try: 
-            tokenizer = AutoTokenizer.from_pretrained(model, use_fast=False)
-        except:
-            tokenizer = LlamaTokenizer.from_pretrained(model, use_fast=False)
-        testenc = tokenizer("\n\n".join(testdata['text']), return_tensors='pt')
-        return testenc
-    if 'ptb' in name:
-        valdata = load_dataset('ptb_text_only', 'penn_treebank', split='validation')
-        try: 
-            tokenizer = AutoTokenizer.from_pretrained(model, use_fast=False)
-        except:
-            tokenizer = LlamaTokenizer.from_pretrained(model, use_fast=False)
-        testenc = tokenizer("\n\n".join(valdata['sentence']), return_tensors='pt')
-        return testenc

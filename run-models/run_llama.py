@@ -43,7 +43,7 @@ def greedy_generate(model, tokenizer, input_ids, past_key_values,KVCache_manager
         )
         if enable_modify:
             past_key_values = None 
-             
+            # KVCache_manager.copy_stream.synchronize()
 
         else:
             past_key_values = outputs.past_key_values
@@ -109,7 +109,7 @@ def main(args):
     print(f"Loading model from {args.model_name_or_path} ...")
     model_name_or_path = args.model_name_or_path
     model, tokenizer = load_model(model_name_or_path)
-    
+     
     # load KV manager 
     KVCache_manager = None
 
@@ -118,14 +118,14 @@ def main(args):
         config = model.config 
         KVCache_manager = KVCache_manager_(
             start_size=4,
-            recent_size=40,
+            recent_size=200,
             k_seq_dim=2,
             v_seq_dim=2,
             head_dim=config.hidden_size//config.num_attention_heads,
             num_heads=config.num_attention_heads,
             num_layers=config.num_hidden_layers,
-            gpu_cache_max=2000,
-            cpu_attn_size=2000,
+            gpu_cache_max=20000,
+            cpu_attn_size=10000,
             gpu_cache_device="cuda",
         )
 
@@ -137,7 +137,7 @@ def main(args):
         KVCache_manager.print_coverage()
 
         modify_llama_attention(model,KVCache_manager)
-    
+    print(model.config)
     # start inference 
     inference(
         model,
@@ -153,8 +153,12 @@ if __name__ == "__main__":
     logging.basicConfig(filename='KV_cache_statics.log', level=logging.INFO)
     
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config_file_path", type=str, default="kv_manager_InitConfig/llama-vicuna-13b-v1.3.json")
-    parser.add_argument("--model_name_or_path", type=str, default="lmsys/vicuna-13b-v1.3")
+     
+    parser.add_argument("--model_name_or_path", type=str, default="lmsys/vicuna-7b-v1.5-16k")
+    # parser.add_argument("--model_name_or_path", type=str, default="lmsys/vicuna-13b-v1.3")
+    parser.add_argument("--config_file_path", type=str, default="kv_manager_config/llama-vicuna-13b-v1.3.json")
+
+
     # parser.add_argument("--data_root", type=str, default="hakurei/open-instruct-v1")
     parser.add_argument("--data_root", type=str, default="data/mt_bench.jsonl")
     parser.add_argument("--enable_modify", action="store_true")

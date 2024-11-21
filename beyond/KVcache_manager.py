@@ -64,14 +64,23 @@ class KVCache_manager_:
         assert 0<=idx<self.num_layers, f"invalid layer index {idx}"
         return self.kv_cache[idx]
  
+    def modify_start_size(self,start_size):     
+        for idx in self.num_layers:
+            self.modify_start_size_by_layer(idx,start_size)
+        return     
+ 
+    def modify_recent_size(self,recent_size):     
+        for idx in self.num_layers:
+            self.modify_recent_size_by_layer(idx,recent_size)
+        return     
 
     def modify_recent_size_by_layer(self,idx,recent_size):     
         self.recent_sizes[idx] = recent_size 
-
+        return
     
     def modify_start_size_by_layer(self,idx,start_size ):     
         self.start_sizes[idx]  = start_size 
-     
+        return 
 
     def get_past_key_values_length(self,):
         k_gpu,_,k_cpu,_ =  self.kv_cache[0] 
@@ -103,6 +112,7 @@ class KVCache_manager_:
                 
                 ## case 2:  no prevrious and added cache bigger than allowed on GPU, evict part to CPU
                 else:
+                     
                     self.kv_cache[idx] = [
 
                         #####################
@@ -129,8 +139,8 @@ class KVCache_manager_:
                         self.k_slice(k2add, self.start_sizes[idx] , add_len - self.recent_sizes[idx]).to('cpu', non_blocking=True),
                         self.v_slice(v2add, self.start_sizes[idx] , add_len - self.recent_sizes[idx]).to('cpu', non_blocking=True)
                     ]
-                
-                
+                    self.cpu_kv_flags[idx] = True
+                 
             else:
                 
                 ## case 3: previous cache + added cache smaller than allowed on GPU
@@ -208,6 +218,7 @@ class KVCache_manager_:
                                 ], dim=self.v_seq_dim) ]
                     ## case 4.2: + no previous cpu cache
                     else:
+                       
                         self.kv_cache[idx][2:] =[
                             self.k_slice(k_gpu, self.start_sizes[idx] , self.start_sizes[idx] + evict_len).to('cpu', non_blocking=True),
                             self.v_slice(v_gpu, self.start_sizes[idx] , self.start_sizes[idx] + evict_len).to('cpu', non_blocking=True)]

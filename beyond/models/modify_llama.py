@@ -23,9 +23,7 @@ logger = logging.getLogger(__name__)
 from transformers.models.llama.modeling_llama import (
     LlamaAttention,
     rotate_half,
-    apply_rotary_pos_emb,
     repeat_kv,
-    LlamaRotaryEmbedding,
 )
  
 
@@ -70,17 +68,18 @@ def modified_llama_attention_forward(
      
     
     k_cache_gpu,v_cache_gpu,k_cache_cpu,v_cache_cpu = self.KVCache_manager(self.attn_layer_idx) # b,h,s,d
-
+     
     torch.cuda.synchronize()
 
     
-    kv_seq_len = k_states.size(-2)
+    kv_seq_len = q_len
 
 
 
     if k_cache_gpu is not None:
-
+         
         if self.attn_layer_idx==0:
+             
             info = f"GPU cache size: {k_cache_gpu.size(-2)}"
             if k_cache_cpu is not None:  info +=  f" | CPU cache size: {k_cache_cpu.size(-2)}"
             logger.info(info)
@@ -118,19 +117,27 @@ def modified_llama_attention_forward(
             
 
             # load appended token stats to CPU
+        
             k_cache_cpu = torch.cat([k_cache_cpu, k_states.to('cpu')], dim=2)
             v_cache_cpu = torch.cat([v_cache_cpu, v_states.to('cpu')], dim=2)
+            position_ids_cpu = torch.cat([  
+                    torch.arange(start_size, start_size+cpu_attn_size, device='cpu'),
+                    torch.arange(kv_seq_len-q_len, kv_seq_len, device='cpu')
+                    ],dim=0).unsqueeze(0)
+           
+            
+            
             q_cpu = q_states.detach().to('cpu')
             attention_mask_q_cpu = attention_mask_q.to('cpu') if attention_mask_q is not None else attention_mask_q 
-          
-
-            cos_cpu, sin_cpu = self.rotary_emb_cpu(v_cache_cpu, seq_len=kv_seq_len)
-            position_ids_cpu = torch.cat([  
-                torch.arange(start_size, start_size+cpu_attn_size, device='cpu'),
-                torch.arange(kv_seq_len-q_len, kv_seq_len, device='cpu')
-                ],dim=0).unsqueeze(0)
+            
              
+            cos_cpu, sin_cpu = self.rotary_emb_cpu(v_cache_cpu, seq_len=kv_seq_len)
+        
+            # v_cache_cpu = v_cache_cpu[:,:,-cpu_attn_size-q_len:,:]
+            # k_cache_cpu = k_cache_cpu[:,:,-cpu_attn_size-q_len:,:]
             k_cache_cpu = apply_rotary_pos_emb_single(k_cache_cpu,  cos_cpu, sin_cpu, position_ids_cpu)
+            
+            
             k_cache_cpu = repeat_kv(k_cache_cpu, self.num_key_value_groups)
             v_cache_cpu = repeat_kv(v_cache_cpu, self.num_key_value_groups)
             v_cpu,s_cpu = self.mha_lse(q_cpu,k_cache_cpu,v_cache_cpu,attention_mask_q_cpu)
@@ -146,7 +153,7 @@ def modified_llama_attention_forward(
                 torch.arange(start_size+cpu_attn_size, kv_seq_len, device=k_cache_gpu.device)
                 ],dim=0).unsqueeze(0)
         
-      
+  
         k_cache_gpu = apply_rotary_pos_emb_single(k_cache_gpu,  cos_gpu, sin_gpu, position_ids_gpu)
          
         
@@ -190,7 +197,7 @@ def modified_llama_attention_forward(
             
             attn_weights[:,:,:,-q_len:] = attn_weights[:,:,:,-q_len:] + attention_mask
 
-        attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float16).to(q_states.dtype)
+        attn_weights = nn.functional.softmax(attn_weights, dim=-1).to(q_states.dtype)
         
         attn_output = torch.matmul(attn_weights, v_cache_gpu)
         attn_output = attn_output.transpose(1, 2).contiguous()
@@ -227,7 +234,46 @@ def modify_llama_attention(model,KVCache_manager):
     cpu_stream = torch.cuda.Stream()
     copy_stream = torch.cuda.Stream()
     KVCache_manager.copy_stream = copy_stream
-    rotary_emb_cpu = LlamaRotaryEmbedding(head_dim,device='cpu')
+
+
+    if config.rope_scaling is None:
+        from transformers.models.llama.modeling_llama import LlamaRotaryEmbedding
+
+        rotary_emb_cpu = LlamaRotaryEmbedding(
+            head_dim,
+            max_position_embeddings=config.max_position_embeddings,
+            base=config.rope_theta,
+            device='cpu'
+        )
+    else:
+        scaling_type = config.rope_scaling["type"]
+        scaling_factor = config.rope_scaling["factor"]
+        if scaling_type == "linear":
+            from transformers.models.llama.modeling_llama import LlamaLinearScalingRotaryEmbedding
+            rotary_emb_cpu = LlamaLinearScalingRotaryEmbedding(
+                head_dim,
+                max_position_embeddings=config.max_position_embeddings,
+                scaling_factor=scaling_factor,
+                base=config.rope_theta,
+                device='cpu'
+            )
+        elif scaling_type == "dynamic":
+            from transformers.models.llama.modeling_llama import LlamaDynamicNTKScalingRotaryEmbedding
+            rotary_emb_cpu = LlamaDynamicNTKScalingRotaryEmbedding(
+                head_dim,
+                max_position_embeddings=config.max_position_embeddings,
+                scaling_factor=scaling_factor,
+                base=config.rope_theta,
+                device='cpu'
+            )
+        else:
+            raise ValueError(f"Unknown RoPE scaling type {scaling_type}")
+
+
+
+
+
+    # rotary_emb_cpu = LlamaRotaryEmbedding(head_dim,device='cpu')
     merge_state    = merge_state_(config.num_attention_heads)
     mha_lse        = mha_lse_methods('llama')
  

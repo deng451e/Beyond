@@ -19,7 +19,7 @@ bash install.sh
   
 ```bash
 cd run-models
-# To run origianl models 
+# To run original models 
 python run-llama.py 
 python run-opt.py 
 python run-gptNeox.py 

@@ -7,3 +7,6 @@
 [submodule "3rdparty/MoA"]
 	path = 3rdparty/MoA
 	url = git@github.com:thu-nics/MoA.git
+[submodule "3rdparty/streaming-llm"]
+	path = 3rdparty/streaming-llm
+	url = git@github.com:mit-han-lab/streaming-llm.git

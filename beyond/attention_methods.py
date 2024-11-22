@@ -57,7 +57,7 @@ class mha_lse_methods:
     def __init__(self,methods ):
         self.methods = methods
         
-    def __call__(self, q,k,v,attention_mask=None,alpha=1):
+    def __call__(self, q,k,v,attention_mask=None):
         
         #shape: b,h,s,d
         batch_size,num_heads,qs,head_dim = q.size()
@@ -66,8 +66,7 @@ class mha_lse_methods:
         k = k.permute(0,1,3,2).reshape(batch_size  * num_heads, head_dim, -1) # bh,d,s
         v = v.reshape(batch_size  * num_heads, -1, head_dim) # bh,s,d
         attn_weights = torch.bmm(q,k)   # bh,qs,s 
-       
-        
+      
         max_scores, _ = attn_weights.max(dim=-1, keepdim=True) 
         attn_weights  = attn_weights - max_scores
         # model attention differs by masking mechanism
@@ -95,16 +94,15 @@ class mha_lse_methods:
          
         exp_scores = torch.exp(attn_weights).to(v.dtype)
         sum_exp_scores = exp_scores.sum(dim=-1, keepdim=True)
-        log_sum = (torch.log(sum_exp_scores) + max_scores).float() * torch.tensor(1.4427,dtype=torch.float32)  
+        log_sum = (torch.log(sum_exp_scores)  + max_scores) * torch.tensor(1.4427) 
         attn_weights = exp_scores / sum_exp_scores 
         #attn_weights = attn_weights.to(v.dtype)
         
         value  = torch.bmm(attn_weights, v).permute(1,0,2).half().contiguous()
-       
-        log_sum = log_sum.squeeze(-1).permute(1,0).contiguous() 
+        log_sum = log_sum.squeeze(-1).permute(1,0).contiguous().float() 
         
        
-        if check_tensor_device(q,'cpu'):  return  (value*torch.tensor(alpha) ).pin_memory(),(log_sum).pin_memory()
+        if check_tensor_device(q,'cpu'):  return  value.pin_memory(),log_sum.pin_memory()
         if check_tensor_device(q,'cuda'): return  value, log_sum
             
     
@@ -323,17 +321,17 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     
     
-    parser.add_argument("--start_size", type=int, default=50)
-    parser.add_argument("--recent_size", type=int, default=3800) 
-    parser.add_argument("--seq_len", type=int, default=3851)
+    parser.add_argument("--start_size", type=int, default=4)
+    parser.add_argument("--recent_size", type=int, default=1000) 
+    parser.add_argument("--seq_len", type=int, default=10000)
     parser.add_argument("--q_len", type=int, default=1)
-    parser.add_argument("--topk", type=int, default=3)
+    parser.add_argument("--topk", type=int, default=10)
     parser.add_argument("--blk_size", type=int, default=100)
 
     # model config 
     parser.add_argument("--num_heads", type=int, default=32)
     parser.add_argument("--hidden_size", type=int, default=4096)
-    parser.add_argument("--model_type", type=str, default="llama")
+    parser.add_argument("--model_type", type=str, default="opt")
     parser.add_argument("--RoPE", type=bool, default=True )
     
     # test config 

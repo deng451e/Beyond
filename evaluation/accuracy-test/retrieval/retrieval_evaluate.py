@@ -17,7 +17,7 @@ from typing import Dict, Tuple, Optional
 import logging
 logger = logging.getLogger(__name__)
  
-os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+os.environ["CUDA_LAUNCH_BLOCKING"] = "0"
 
 def generate_input(test_case: Dict, tokenizer, model_name_or_path: str) -> Tuple[str, int]:
     """
@@ -47,7 +47,7 @@ def process_prompt(input, model, tokenizer, test_case: Dict, output_file: Option
     device = getattr(model, "device", "cpu")
     
   
-    input_ids =input.input_ids[:,:5000]
+    input_ids =input.input_ids[:,:2000]
     past_key_values=None
  
     
@@ -182,7 +182,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--token_interval",
         type=int,
-        default=1024,
+        default=512,
         help="Token interval",
     )
     parser.add_argument(
@@ -314,7 +314,7 @@ if __name__ == "__main__":
     global_size = 4
 
     os.makedirs(args.output_dir, exist_ok=True)
-
+    
     for context_length in tqdm(context_length_range, position=0):
         # initialize everything
         now = datetime.now()
@@ -330,17 +330,19 @@ if __name__ == "__main__":
         # start test
         for i, data in enumerate(dataset):
             pbar.update(1)
-           
-           
+
+            # if len(data["question"])>4000:
+            #     continue 
 
             # check whether tokenized_len key is in data
             if 'tokenized_len' in data:
+                 
                 prompt_length = data['tokenized_len']
+ 
                 current_length_level = int((prompt_length - 1) // token_interval) + 1
                 if (current_length_level not in length_level):
                     continue
-
-                    
+             
             prompt, stop_token_ids = generate_input(data, tokenizer, model_name)
             input = tokenizer(prompt, return_tensors="pt")
              
@@ -389,7 +391,7 @@ if __name__ == "__main__":
         # except:
         #     print("error in saving the result")
         #     pass
-
+     
     print("Retrieval Evaluation Finished")
     now = datetime.now()
     datetime_str = now.strftime("%Y%m%d-%H%M")

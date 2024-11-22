@@ -157,7 +157,7 @@ if __name__ == "__main__":
     logging.basicConfig(filename='KV_cache_statics.log', level=logging.INFO)
     
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config_file_path", type=str, default="kv_manager_InitConfig/lotus-12B.json")
+    parser.add_argument("--config_file_path", type=str, default="kv_manager_config/lotus-12B.json")
     parser.add_argument("--model_name_or_path", type=str, default="hakurei/lotus-12B")
     parser.add_argument("--data_root", type=str, default="hakurei/open-instruct-v1")
     

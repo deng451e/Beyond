@@ -157,8 +157,8 @@ if __name__ == "__main__":
     logging.basicConfig(filename='KV_cache_statics.log', level=logging.INFO)
     
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config_file_path", type=str, default="kv_manager_InitConfig/opt-13b.json")
-    parser.add_argument("--model_name_or_path", type=str, default="facebook/opt-13b")
+    parser.add_argument("--config_file_path", type=str, default="kv_manager_config/opt-13b.json")
+    parser.add_argument("--model_name_or_path", type=str, default="facebook/opt-6.7b")
     parser.add_argument("--data_root", type=str, default="facebook/content_rephrasing")
       
     # parser.add_argument("--data_root", type=str, default="data/mt_bench.jsonl")

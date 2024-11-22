@@ -168,9 +168,9 @@ def modified_llama_attention_forward(
         #    Merge State    # 
         ##################### 
         
-        self.cpu_stream.synchronize()
+        # self.cpu_stream.synchronize()
         attn_output,_ = self.merge_state(v_cpu,s_cpu,v_gpu,s_gpu)
-        torch.cuda.synchronize()
+        # torch.cuda.synchronize()
        
     # Default Full GPU attention
     else:   

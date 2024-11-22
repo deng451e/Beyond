@@ -1,0 +1,228 @@
+{
+    "gpu_cache_device": "cuda",
+    "layer 0": {
+        "start_size": 10,
+        "recent_size": 20000,
+        "cpu_attn_size": 2000,
+        "gpu_cache_max": 2000,
+        "block_size": 10
+    },
+    "layer 1": {
+        "start_size": 10,
+        "recent_size": 20000,
+        "cpu_attn_size": 2000,
+        "gpu_cache_max": 2000,
+        "block_size": 10
+    },
+    "layer 2": {
+        "start_size": 10,
+        "recent_size": 20000,
+        "cpu_attn_size": 2000,
+        "gpu_cache_max": 2000,
+        "block_size": 10
+    },
+    "layer 3": {
+        "start_size": 10,
+        "recent_size": 20000,
+        "cpu_attn_size": 2000,
+        "gpu_cache_max": 2000,
+        "block_size": 10
+    },
+    "layer 4": {
+        "start_size": 10,
+        "recent_size": 100,
+        "cpu_attn_size": 2000,
+        "gpu_cache_max": 2000,
+        "block_size": 10
+    },
+    "layer 5": {
+        "start_size": 10,
+        "recent_size": 100,
+        "cpu_attn_size": 2000,
+        "gpu_cache_max": 2000,
+        "block_size": 10
+    },
+    "layer 6": {
+        "start_size": 10,
+        "recent_size": 100,
+        "cpu_attn_size": 2000,
+        "gpu_cache_max": 2000,
+        "block_size": 10
+    },
+    "layer 7": {
+        "start_size": 10,
+        "recent_size": 100,
+        "cpu_attn_size": 2000,
+        "gpu_cache_max": 2000,
+        "block_size": 10
+    },
+    "layer 8": {
+        "start_size": 10,
+        "recent_size": 100,
+        "cpu_attn_size": 2000,
+        "gpu_cache_max": 2000,
+        "block_size": 10
+    },
+    "layer 9": {
+        "start_size": 10,
+        "recent_size": 100,
+        "cpu_attn_size": 2000,
+        "gpu_cache_max": 2000,
+        "block_size": 10
+    },
+    "layer 10": {
+        "start_size": 10,
+        "recent_size": 100,
+        "cpu_attn_size": 2000,
+        "gpu_cache_max": 2000,
+        "block_size": 10
+    },
+    "layer 11": {
+        "start_size": 10,
+        "recent_size": 100,
+        "cpu_attn_size": 2000,
+        "gpu_cache_max": 2000,
+        "block_size": 10
+    },
+    "layer 12": {
+        "start_size": 10,
+        "recent_size": 100,
+        "cpu_attn_size": 2000,
+        "gpu_cache_max": 2000,
+        "block_size": 10
+    },
+    "layer 13": {
+        "start_size": 10,
+        "recent_size": 100,
+        "cpu_attn_size": 2000,
+        "gpu_cache_max": 2000,
+        "block_size": 10
+    },
+    "layer 14": {
+        "start_size": 10,
+        "recent_size": 100,
+        "cpu_attn_size": 2000,
+        "gpu_cache_max": 2000,
+        "block_size": 10
+    },
+    "layer 15": {
+        "start_size": 10,
+        "recent_size": 100,
+        "cpu_attn_size": 2000,
+        "gpu_cache_max": 2000,
+        "block_size": 10
+    },
+    "layer 16": {
+        "start_size": 10,
+        "recent_size": 100,
+        "cpu_attn_size": 2000,
+        "gpu_cache_max": 2000,
+        "block_size": 10
+    },
+    "layer 17": {
+        "start_size": 10,
+        "recent_size": 100,
+        "cpu_attn_size": 2000,
+        "gpu_cache_max": 2000,
+        "block_size": 10
+    },
+    "layer 18": {
+        "start_size": 10,
+        "recent_size": 100,
+        "cpu_attn_size": 2000,
+        "gpu_cache_max": 2000,
+        "block_size": 10
+    },
+    "layer 19": {
+        "start_size": 10,
+        "recent_size": 100,
+        "cpu_attn_size": 2000,
+        "gpu_cache_max": 2000,
+        "block_size": 10
+    },
+    "layer 20": {
+        "start_size": 10,
+        "recent_size": 100,
+        "cpu_attn_size": 2000,
+        "gpu_cache_max": 2000,
+        "block_size": 10
+    },
+    "layer 21": {
+        "start_size": 10,
+        "recent_size": 100,
+        "cpu_attn_size": 2000,
+        "gpu_cache_max": 2000,
+        "block_size": 10
+    },
+    "layer 22": {
+        "start_size": 10,
+        "recent_size": 100,
+        "cpu_attn_size": 2000,
+        "gpu_cache_max": 2000,
+        "block_size": 10
+    },
+    "layer 23": {
+        "start_size": 10,
+        "recent_size": 100,
+        "cpu_attn_size": 2000,
+        "gpu_cache_max": 2000,
+        "block_size": 10
+    },
+    "layer 24": {
+        "start_size": 10,
+        "recent_size": 100,
+        "cpu_attn_size": 2000,
+        "gpu_cache_max": 2000,
+        "block_size": 10
+    },
+    "layer 25": {
+        "start_size": 10,
+        "recent_size": 100,
+        "cpu_attn_size": 0,
+        "gpu_cache_max": 2000,
+        "block_size": 10
+    },
+    "layer 26": {
+        "start_size": 10,
+        "recent_size": 100,
+        "cpu_attn_size": 0,
+        "gpu_cache_max": 2000,
+        "block_size": 10
+    },
+    "layer 27": {
+        "start_size": 10,
+        "recent_size": 100,
+        "cpu_attn_size": 0,
+        "gpu_cache_max": 2000,
+        "block_size": 10
+    },
+    "layer 28": {
+        "start_size": 10,
+        "recent_size": 100,
+        "cpu_attn_size": 0,
+        "gpu_cache_max": 2000,
+        "block_size": 10
+    },
+    "layer 29": {
+        "start_size": 10,
+        "recent_size": 100,
+        "cpu_attn_size": 0,
+        "gpu_cache_max": 2000,
+        "block_size": 10
+    },
+    "layer 30": {
+        "start_size": 10,
+        "recent_size": 100,
+        "cpu_attn_size": 0,
+        "gpu_cache_max": 2000,
+        "block_size": 10
+    },
+    "layer 31": {
+        "start_size": 10,
+        "recent_size": 100,
+        "cpu_attn_size": 0,
+        "gpu_cache_max": 2000,
+        "block_size": 10
+    }
+  
+}

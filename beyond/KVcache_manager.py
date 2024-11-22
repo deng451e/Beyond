@@ -65,12 +65,12 @@ class KVCache_manager_:
         return self.kv_cache[idx]
  
     def modify_start_size(self,start_size):     
-        for idx in self.num_layers:
+        for idx in range(self.num_layers):
             self.modify_start_size_by_layer(idx,start_size)
         return     
  
     def modify_recent_size(self,recent_size):     
-        for idx in self.num_layers:
+        for idx in range(self.num_layers):
             self.modify_recent_size_by_layer(idx,recent_size)
         return     
 

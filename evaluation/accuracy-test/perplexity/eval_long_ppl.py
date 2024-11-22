@@ -31,9 +31,9 @@ def eval(args):
     ##############################
     #          beyond            #
     ##############################
-    if args.enable_beyond or  args.enable_streamllm:
+    if args.enable_beyond:
                 
-        from beyond.models.modify_opt import modify_opt_attention
+         
         from beyond.KVcache_manager import KVCache_manager_
         if "llama" in model.config.model_type:
             from beyond.models.modify_llama import modify_llama_attention as modify_attention
@@ -52,7 +52,7 @@ def eval(args):
             num_heads=config.num_attention_heads,
             num_layers=config.num_hidden_layers,
             gpu_cache_max=20000,
-            cpu_attn_size=2000 if  args.enable_beyond else 0,
+            cpu_attn_size=2000 ,
             gpu_cache_device="cuda",
         )
         if args.config_file_path:
@@ -60,14 +60,37 @@ def eval(args):
             KVCache_manager = set_kv_manager_config(KVCache_manager,args.config_file_path)
         KVCache_manager.print_coverage()
         modify_attention(model,KVCache_manager)
- 
+    ##############################
+    #        streamllm           #
+    ##############################
+    if  args.enable_streamllm:
+        from streaming_llm.kv_cache import StartRecentKVCache
+        kv_cache = StartRecentKVCache(
+            start_size=args.start_size,
+            recent_size=args.recent_size,
+            k_seq_dim=k_seq_dim,
+            v_seq_dim=v_seq_dim,
+        )
+        if "llama" in model.config.model_type:
+            from streaming_llm.pos_shift.modify_llama import enable_llama_pos_shift_attention
+
+            enable_llama_pos_shift_attention(model)
+    
+        elif "gpt_neox" in model.config.model_type:
+            from streaming_llm.pos_shift.modify_gpt_neox import (
+                enable_gpt_neox_pos_shift_attention,
+            )
+
+            enable_gpt_neox_pos_shift_attention(model)
+       
+    
+
     
     num_eval_tokens = 0
     for text in data["text"][: args.num_samples]:
         
         encodings = tokenizer(text, return_tensors="pt")
- 
-
+  
         seq_len = encodings.input_ids.size(1)
         
         pbar = tqdm(range(0, seq_len - 1))
@@ -84,11 +107,14 @@ def eval(args):
                     use_cache=True,
                 )
                 logits = outputs.logits.view(-1, model.config.vocab_size)
-                if args.enable_beyond or args.enable_streamllm:
+
+                if args.enable_beyond:
                     past_key_values = None 
-                    
+                elif  args.enable_streamllm:
+                    past_key_values = kv_cache(past_key_values)
                 else:
                     past_key_values = outputs.past_key_values
+                    
                 label = encodings.input_ids[:, idx + 1 : idx + 2].to(logits.device).view(-1)
                 neg_log_likelihood = loss_fn(logits, label)
                  

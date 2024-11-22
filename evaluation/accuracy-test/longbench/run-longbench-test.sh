@@ -1,6 +1,6 @@
 rm results -r
 rm longbench-test-results.log 
-for method in      "beyond"    "streamllm"    "normal" 
+for method in    "streamllm"        "beyond"    "normal" 
 do
     for model in   "lmsys/vicuna-7b-v1.5-16k" #   "lmsys/vicuna-13b-v1.3"        "facebook/opt-6.7b"     "facebook/opt-1.3b" "facebook/opt-2.7b"   
     do

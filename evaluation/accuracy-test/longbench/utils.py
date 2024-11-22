@@ -296,10 +296,12 @@ def get_pred(model, tokenizer, data, max_length, max_gen, prompt_format, dataset
 
     stop_token_ids = build_stop_token(model_name, tokenizer)
     cnt =  0
-     
-    latency = []
+    enable_streamllm = False if kv_cache is None else True
+    if enable_streamllm:
+        from streaming_llm.kv_cache import StartRecentKVCache
+    latency = []  
     for json_obj in tqdm(data):
-        if cnt==3: break 
+        if cnt==10: break 
         cnt += 1
         
         prompt = prompt_format.format(**json_obj)
@@ -316,7 +318,16 @@ def get_pred(model, tokenizer, data, max_length, max_gen, prompt_format, dataset
       
         if  enable_beyond: 
             KVCache_manager.clear_kv_cache()
-            KVCache_manager.modify_recent_size(input.input_ids.shape[-1]-10)
+            KVCache_manager.modify_recent_size(input.input_ids.shape[-1])
+        if enable_streamllm:
+
+         
+              kv_cache = StartRecentKVCache(
+                start_size=10,
+                recent_size=input.input_ids.shape[-1],
+                k_seq_dim=2,
+                v_seq_dim=2,
+            )
         context_length = input.input_ids.shape[-1]
         st = time.time()
         if dataset == "samsum": # prevent illegal output on samsum (model endlessly repeat "\nDialogue"), might be a prompting issue
@@ -385,7 +396,9 @@ def get_pred(model, tokenizer, data, max_length, max_gen, prompt_format, dataset
                     )
                     if enable_beyond:
                         past_key_values = None 
-                        
+                    elif kv_cache is not None:
+                        past_key_values = kv_cache(past_key_values)
+                 
                     else:
                         past_key_values = outputs.past_key_values
                      

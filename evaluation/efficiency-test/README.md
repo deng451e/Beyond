@@ -4,22 +4,21 @@
 
 
 
-### Throughput Tests
+### FlexGen Tests
   
 ```bash
-# To run preliminary tests
-bash run-opt-6.7b.sh
-
+cd flexge-test
+bash run-opt-flexgen.sh
 
 ```
 
 
 
 
-### Memory Tests
-  
+### Other Tests
 ```bash
-# To run preliminary tests
-cd  evaluation/preliminary-test
+ 
+cd  other-test
+bash run-all-test.sh
  
 ``` 

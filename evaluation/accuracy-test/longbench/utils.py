@@ -316,7 +316,7 @@ def get_pred(model, tokenizer, data, max_length, max_gen, prompt_format, dataset
       
         if  enable_beyond: 
             KVCache_manager.clear_kv_cache()
-            KVCache_manager.modify_recent_size(input.input_ids.shape[-1]+100)
+            KVCache_manager.modify_recent_size(input.input_ids.shape[-1]-10)
         context_length = input.input_ids.shape[-1]
         st = time.time()
         if dataset == "samsum": # prevent illegal output on samsum (model endlessly repeat "\nDialogue"), might be a prompting issue

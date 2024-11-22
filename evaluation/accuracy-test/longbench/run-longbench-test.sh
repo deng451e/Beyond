@@ -16,7 +16,7 @@ do
         if [ "$method" == "streamllm" ];then
           cmd+=" --enable_streamllm"   
         fi 
-        
+      
         outpt="======================================="$'\n'
         outpt+="model: $model, method: $method"$'\n'
         outpt+=$($cmd 2>&1 | grep -e "score:" -e "latency:" -e "dataset:")

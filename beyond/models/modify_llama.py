@@ -49,7 +49,7 @@ def modified_llama_attention_forward(
     output_attentions: bool = False,
     use_cache: bool = False,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
-  
+    
     batch_size, q_len, _ = hidden_states.size()  
       
     q_states = self.q_proj(hidden_states)
@@ -185,9 +185,9 @@ def modified_llama_attention_forward(
         k_cache_gpu = repeat_kv(k_cache_gpu, self.num_key_value_groups)
         v_cache_gpu = repeat_kv(v_cache_gpu, self.num_key_value_groups)
       
+        attn_weights = torch.matmul(q_states, k_cache_gpu.transpose(2, 3))  
         
         # subtract maximum value to improve numerical stability
-        attn_weights = torch.matmul(q_states, k_cache_gpu.transpose(2, 3))  
         max_scores, _ = attn_weights.max(dim=-1, keepdim=True) 
         attn_weights = attn_weights - max_scores
 
@@ -208,7 +208,7 @@ def modified_llama_attention_forward(
     kv_cache_2add = (k_states, v_states) # if use_cache else None
     
     self.KVCache_manager.add_kv_cache_by_layer(self.attn_layer_idx, kv_cache_2add)
-     
+ 
      
      
     attn_output = attn_output.reshape(batch_size, q_len, self.hidden_size)

@@ -118,7 +118,7 @@ def main(args):
         config = model.config 
         KVCache_manager = KVCache_manager_(
             start_size=4,
-            recent_size=200,
+            recent_size=1000,
             k_seq_dim=2,
             v_seq_dim=2,
             head_dim=config.hidden_size//config.num_attention_heads,
@@ -130,14 +130,14 @@ def main(args):
         )
 
     
-        # if args.config_file_path:
-        #     print(f"Loading KV manager from {args.config_file_path} ...")
-        #     KVCache_manager = set_kv_manager_config(KVCache_manager,args.config_file_path)
+        if args.config_file_path:
+            print(f"Loading KV manager from {args.config_file_path} ...")
+            KVCache_manager = set_kv_manager_config(KVCache_manager,args.config_file_path)
  
         KVCache_manager.print_coverage()
 
         modify_llama_attention(model,KVCache_manager)
-    print(model.config)
+    
     # start inference 
     inference(
         model,
@@ -156,7 +156,8 @@ if __name__ == "__main__":
      
     parser.add_argument("--model_name_or_path", type=str, default="lmsys/vicuna-7b-v1.5-16k")
     # parser.add_argument("--model_name_or_path", type=str, default="lmsys/vicuna-13b-v1.3")
-    parser.add_argument("--config_file_path", type=str, default="kv_manager_config/llama-vicuna-13b-v1.3.json")
+    #
+    parser.add_argument("--config_file_path", type=str, default=None)
 
 
     # parser.add_argument("--data_root", type=str, default="hakurei/open-instruct-v1")

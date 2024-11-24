@@ -7,10 +7,7 @@ import argparse
 import json
 import os
 import time
-import re
-import sys
-
-from tqdm import tqdm
+import numpy as np 
 from beyond.utils import *
 from beyond.loading import * 
 from beyond.models.modify_gptNeox import modify_GPTNeoX_attention
@@ -134,9 +131,9 @@ def main(args):
         )
 
     
-        # if args.config_file_path:
-        #     print(f"Loading KV manager from {args.config_file_path} ...")
-        #     KVCache_manager = set_kv_manager_config(KVCache_manager,args.config_file_path)
+        if args.config_file_path is not None:
+            print(f"Loading KV manager from {args.config_file_path} ...")
+            KVCache_manager = set_kv_manager_config(KVCache_manager,args.config_file_path)
  
         KVCache_manager.print_coverage()
 
@@ -157,7 +154,8 @@ if __name__ == "__main__":
     logging.basicConfig(filename='KV_cache_statics.log', level=logging.INFO)
     
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config_file_path", type=str, default="kv_manager_config/lotus-12B.json")
+    #"kv_manager_config/lotus-12B.json"
+    parser.add_argument("--config_file_path", type=str, default=None)
     parser.add_argument("--model_name_or_path", type=str, default="hakurei/lotus-12B")
     parser.add_argument("--data_root", type=str, default="hakurei/open-instruct-v1")
     

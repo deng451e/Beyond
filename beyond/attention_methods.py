@@ -138,6 +138,7 @@ class merge_state_:
             num_partition = (va.size(-2)+partitions_dim-1)//partitions_dim
             for i in range(num_partition):
                 start,end = i*partitions_dim,min((i+1)*partitions_dim,va.size(-2))
+                 
                 va_,sa_ = va[:,start:end,:].contiguous().pin_memory(),sa[:,start:end].contiguous().pin_memory()
                 vb_,sb_ = vb[:,start:end,:].contiguous(),sb[:,start:end].contiguous()
                 if self.in_place:

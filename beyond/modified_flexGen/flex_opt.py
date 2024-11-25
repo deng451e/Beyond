@@ -471,9 +471,11 @@ class SelfAttention:
              
             k_cache_gpu = k_cache_gpu.to(h.device.name)
             v_cache_gpu = v_cache_gpu.to(h.device.name)
+            cpu_attn_size = 0
+            start_size  = self.KVCache_manager.start_sizes[self.attn_layer_idx]
             if k_cache_cpu is not None:
                 cpu_attn_size = self.KVCache_manager.cpu_attn_sizes[self.attn_layer_idx]
-                start_size  = self.KVCache_manager.start_sizes[self.attn_layer_idx]
+                 
             
             torch.cuda.synchronize()
             if self.attn_layer_idx==0:
@@ -486,7 +488,7 @@ class SelfAttention:
                 b_q, w_k, b_k, w_v, b_v, w_out, b_out, w_ln, b_ln, n_head,
                 k_cache_gpu,v_cache_gpu,k_cache_cpu,v_cache_cpu, donate, self.policy.attn_sparsity,
                 self.policy.compress_cache, self.policy.comp_cache_config, cpu_attn_size,start_size)
-            
+        
         kv_cache_2add = (new_k_cache, new_v_cache)
         
         self.KVCache_manager.add_kv_cache_by_layer(self.attn_layer_idx, kv_cache_2add)
@@ -1246,17 +1248,18 @@ def run_flexgen(args):
     opt_config = get_opt_config(args.model)
     cache_size = opt_config.cache_bytes(num_prompts, prompt_len + gen_len)
     hidden_size = opt_config.hidden_bytes(num_prompts, prompt_len + gen_len)
-
- 
+    
+     
     model = OptLM(opt_config, env, args.path, policy)
      
     # Task and policy
     warmup_inputs = get_inputs(2048, num_prompts, tokenizer, args.warmup_input_path)
     inputs = get_inputs(prompt_len, num_prompts, tokenizer, args.test_input_path)
-
+    
     ###################################
     #             beyond              #
     ###################################
+
     start_size=args.start_size
     recent_size=args.recent_size
     global layer_idx
@@ -1285,15 +1288,15 @@ def run_flexgen(args):
                 module.KVCache_manager = KVCache_manager
                 layer_idx -= 1  # layer are reverseved travesed 
     add_module(model)
-
+    
 
     KVCache_manager.print_coverage()
     ###################################
-
+    
     try:
-        output_ids = model.generate(
-            warmup_inputs, max_new_tokens=1, verbose=args.verbose)
-
+        output_ids = model.generate( warmup_inputs, max_new_tokens=1, verbose=args.verbose)
+        KVCache_manager.clear_kv_cache()
+         
         timers("generate").reset()
         output_ids = model.generate(
             inputs, max_new_tokens=args.gen_len,
@@ -1319,7 +1322,6 @@ def run_flexgen(args):
     projected = bool(args.debug_mode or cut_gen_len)
 
     print("+++++++++++++++++++++++++++++++++++++++++++++++++")
-     
     print("Beyond")
     print("input: " + str(prompt_len) + " output: " + str(gen_len) + " bsz: " + str(num_prompts))
     print("+++++++++++++++++++++++++++++++++++++++++++++++++")

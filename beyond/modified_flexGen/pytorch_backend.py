@@ -18,7 +18,9 @@ from beyond.attention_methods import (
     mha_lse_methods,
     merge_state_,
 )
- 
+
+# mha_lse = mha_lse_methods("flexgen-opt")
+# merge_state = merge_state_(32)
 
 from flexgen.utils import (GB, T, cpu_mem_stats, vector_gather,
     np_dtype_to_torch_dtype, torch_dtype_to_np_dtype,
@@ -397,10 +399,11 @@ class TorchDevice:
         k = F.linear(hidden, w_k.data, bias=b_k.data)
         v = F.linear(hidden, w_v.data, bias=b_v.data)
         # b,qs,h,d
+
         q     = q.view(b, q_len, n_head, head_dim).permute(0, 2, 1, 3)
         k_new = k.view(b, q_len, n_head, head_dim).permute(0, 2, 1, 3)
         v_new = v.view(b, q_len, n_head, head_dim).permute(0, 2, 1, 3)
-
+         
        
 
          
@@ -465,7 +468,7 @@ class TorchDevice:
             #    Merge State    # 
             ##################### 
             
-            self.cpu_stream.synchronize()
+            # self.cpu_stream.synchronize()
             attn_output,_ = merge_state(v_cpu,s_cpu,v_gpu,s_gpu)
            
             

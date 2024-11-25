@@ -1,10 +1,7 @@
 home_path="$PWD/../../.."
 flexgen_path="$home_path/3rdparty/InfiniGen/speedup/flexgen"
 
-gen_len=600
-prompt_len=600
- 
-
+export CUDA_VISIBLE_DEVICES=0
 rm opt-13b-results.log
 model="huggingface/opt-13b"
 for prompt_len in  1920 #  500 600

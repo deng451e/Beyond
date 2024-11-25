@@ -2,13 +2,13 @@ home_path="$PWD/../../.."
 flexgen_path="$home_path/3rdparty/InfiniGen/speedup/flexgen"
 
 export CUDA_VISIBLE_DEVICES=0
-rm opt-1.3b-results.log
-model="huggingface/opt-1.3b"
+rm opt-6.7b-results.log
+model="huggingface/opt-6.7b"
 for prompt_len in  384 #  500 600
     do 
     for gen_len in  128
     do  
-        for bsz in 5 #2 5
+        for bsz in 2 #2 5
         do
             cmd_="--model $model --percent 100 0 0 100 100 0  --gpu-batch-size $bsz \
             --num-gpu-batches 1 --prompt-len $prompt_len --gen-len $gen_len --warmup-input-path $flexgen_path/pg19_firstbook.txt \
@@ -17,16 +17,16 @@ for prompt_len in  384 #  500 600
         
 
 
-            # beyond
+            # beyonds
             rm $flexgen_path/flexgen/flex_opt.py
             rm $flexgen_path/flexgen/pytorch_backend.py
             ln -s  $home_path/beyond/modified_flexGen/flex_opt.py $flexgen_path/flexgen/flex_opt.py
             ln -s  $home_path/beyond/modified_flexGen/pytorch_backend.py $flexgen_path/flexgen/pytorch_backend.py
-            cmd=$cmd_" --overlap false --start_size 10 --recent_size 384"
+            cmd=$cmd_" --overlap false --start_size 10 --recent_size 400"
             outpt="==================================================================================="$'\n'
             outpt+="method: beyond, model: $model, intput:$prompt_len, output:$gen_len , bzs: $bsz"$'\n'
             outpt+=$( python -m flexgen.flex_opt $cmd 2>&1 | grep   -e"Total:" -e"Prefill:" -e"Decode:")
-            echo "$outpt"  | tee -a opt-1.3b-results.log
+            echo "$outpt"  | tee -a opt-6.7b-results.log
             
 
             #infinigen
@@ -38,7 +38,7 @@ for prompt_len in  384 #  500 600
             outpt="==================================================================================="$'\n'
             outpt+="method: infinigen, model: $model, intput:$prompt_len, output:$gen_len , bzs: $bsz"$'\n'
             outpt+=$( python -m flexgen.flex_opt $cmd 2>&1 | grep   -e"Total:" -e"Prefill:" -e"Decode:")
-            echo "$outpt"  | tee -a opt-1.3b-results.log
+            echo "$outpt"  | tee -a opt-6.7b-results.log
             
 
 
@@ -52,7 +52,7 @@ for prompt_len in  384 #  500 600
             outpt="==================================================================================="$'\n'
             outpt+="method: flexgen, model: $model, intput:$prompt_len, output:$gen_len , bzs: $bsz"$'\n'
             outpt+=$( python -m flexgen.flex_opt $cmd 2>&1 | grep   -e"Total:" -e"Prefill:" -e"Decode:")
-            echo "$outpt"  | tee -a opt-1.3b-results.log
+            echo "$outpt"  | tee -a opt-6.7b-results.log
             
 
             # flexgen-overlap
@@ -64,7 +64,7 @@ for prompt_len in  384 #  500 600
             outpt="==================================================================================="$'\n'
             outpt+="method: flexgen-overlap, model: $model, intput:$prompt_len, output:$gen_len , bzs: $bsz"$'\n'
             outpt+=$( python -m flexgen.flex_opt $cmd 2>&1 | grep   -e"Total:" -e"Prefill:" -e"Decode:")
-            echo "$outpt"  | tee -a opt-1.3b-results.log
+            echo "$outpt"  | tee -a opt-6.7b-results.log
 
 
             
@@ -79,7 +79,7 @@ for prompt_len in  384 #  500 600
             outpt+="method: h2o, model: $model, intput:$prompt_len, output:$gen_len , bzs: $bsz"$'\n'
           
             outpt+=$( python -m flexgen.flex_opt $cmd 2>&1 | grep   -e"Total:" -e"Prefill:" -e"Decode:")
-            echo "$outpt"  | tee -a opt-1.3b-results.log
+            echo "$outpt"  | tee -a opt-6.7b-results.log
         
         done 
         

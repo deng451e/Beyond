@@ -28,13 +28,10 @@ from flexgen.utils import (Task, ExecutionEnv, GB, T, ValueHolder,
 import logging
 logger = logging.getLogger(__name__)
 ###########################
-from beyond.utils import *
+ 
 from beyond.loading import * 
 from beyond.KVcache_manager import KVCache_manager_
-from beyond.attention_methods import (
-    mha_lse_methods,
-    merge_state_,
-)
+ 
 ###########################
 
 fix_recursive_import()
@@ -468,16 +465,16 @@ class SelfAttention:
         else:  # decoding
             ############################################
             k_cache_gpu,v_cache_gpu,k_cache_cpu,v_cache_cpu = self.KVCache_manager(self.attn_layer_idx) # b,h,s,d
-             
-            k_cache_gpu = k_cache_gpu.to(h.device.name)
-            v_cache_gpu = v_cache_gpu.to(h.device.name)
+            torch.cuda.synchronize()
+            # k_cache_gpu = k_cache_gpu.to(h.device.name)
+            # v_cache_gpu = v_cache_gpu.to(h.device.name)
             cpu_attn_size = 0
             start_size  = self.KVCache_manager.start_sizes[self.attn_layer_idx]
             if k_cache_cpu is not None:
                 cpu_attn_size = self.KVCache_manager.cpu_attn_sizes[self.attn_layer_idx]
                  
             
-            torch.cuda.synchronize()
+            
             if self.attn_layer_idx==0:
                 info = f"GPU cache size: {k_cache_gpu.size(-2)}"
                 if k_cache_cpu is not None:  info +=  f" | CPU cache size: {k_cache_cpu.size(-2)}"

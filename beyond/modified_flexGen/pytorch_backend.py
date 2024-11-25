@@ -479,8 +479,8 @@ class TorchDevice:
             
             # subtract maximum value to improve numerical stability
             attn_weights = torch.matmul(q, k_cache_gpu.transpose(2, 3))  
-            max_scores, _ = attn_weights.max(dim=-1, keepdim=True) 
-            attn_weights = attn_weights - max_scores
+            # max_scores, _ = attn_weights.max(dim=-1, keepdim=True) 
+            # attn_weights = attn_weights - max_scores
             attn_weights = F.softmax(attn_weights, dim=-1, dtype=torch.float16).to(q.dtype)
             attn_output = torch.matmul(attn_weights, v_cache_gpu)
             attn_output = attn_output.transpose(1, 2).contiguous()

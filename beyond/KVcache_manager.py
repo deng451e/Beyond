@@ -94,12 +94,26 @@ class KVCache_manager_:
         if k2add is None: return  
 
         k_gpu,v_gpu,k_cpu,v_cpu = self.kv_cache[idx]
-        
+         
+         
+       
         add_len   = k2add.size(self.k_seq_dim)
         gpu_cache_len = k_gpu.size(self.k_seq_dim) if k_gpu is not None else 0 
          
         bound = min(self.recent_sizes[idx]+self.start_sizes[idx],self.gpu_cache_max)
         with torch.cuda.stream(self.copy_stream):
+            ##################################################################################################
+            # load next layer asynchronously to device 
+            if self.gpu_cache_device=='cpu':
+                if k_gpu is not None:
+                    k_gpu,v_gpu = k_gpu.to(self.gpu_cache_device, non_blocking=True),v_gpu.to(self.gpu_cache_device, non_blocking=True) 
+
+
+                self.preload_layer_kv(idx,k2add.device)
+                k2add,v2add = k2add.to(self.gpu_cache_device, non_blocking=True),v2add.to(self.gpu_cache_device, non_blocking=True) 
+                
+            ##################################################################################################
+                 
 
             if gpu_cache_len==0:
         
@@ -183,6 +197,7 @@ class KVCache_manager_:
                     #####################
                     #   GPU kv cache    #
                     #####################
+                     
                     self.kv_cache[idx][:2] = [
                         torch.cat(
                             [
@@ -279,14 +294,12 @@ class KVCache_manager_:
      
   
     def preload_layer_kv(self,idx,device='cuda'):
-        with torch.cuda.stream(self.copy_stream):
-            k_gpu,v_gpu,k_cpu,v_cpu = self.kv_cache[idx]
-            self.kv_cache[idx] = [k_gpu.to('cpu', non_blocking=True),v_gpu.to('cpu', non_blocking=True),k_cpu,v_cpu]
-            idx += 1 
-            idx = (idx+1)%(self.num_layers )
-            k_gpu,v_gpu,k_cpu,v_cpu = self.kv_cache[idx]
-            if k_gpu is not None:
-                self.kv_cache[idx] = [k_gpu.to(device, non_blocking=True),v_gpu.to(device, non_blocking=True),k_cpu,v_cpu]
+         
+        idx = (idx+1)%(self.num_layers )
+        k_gpu,v_gpu,k_cpu,v_cpu = self.kv_cache[idx]
+        
+        if k_gpu is not None:
+            self.kv_cache[idx] = [k_gpu.to(device, non_blocking=True),v_gpu.to(device, non_blocking=True),k_cpu,v_cpu]
         return 
         
     

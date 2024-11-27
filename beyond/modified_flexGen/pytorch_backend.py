@@ -388,7 +388,7 @@ class TorchDevice:
             w_out = w_out.device.decompress(w_out)
 
         b, q_len, h = inputs.shape
-        src_s = attention_mask_.shape[1]
+ 
         head_dim = h // n_head
         scaling = head_dim ** -0.5
 
@@ -445,12 +445,17 @@ class TorchDevice:
                 
 
                 # load appended token stats to CPU
-                k_cache_cpu = torch.cat([k_cache_cpu, k_new.to('cpu')], dim=2)
-                v_cache_cpu = torch.cat([v_cache_cpu, v_new.to('cpu')], dim=2)
-                q_cpu = q.detach().to('cpu')
-                attention_mask_q_cpu = attention_mask_q.to('cpu') if attention_mask_q is not None else attention_mask_q 
+                if q_len!=1:
+                
+                    k_cache_cpu = torch.cat([k_cache_cpu, k_new.to('cpu' ,non_blocking=True)], dim=2)
+                    v_cache_cpu = torch.cat([v_cache_cpu, v_new.to('cpu' ,non_blocking=True)], dim=2)
+                else:
+                    k_cache_cpu = k_new.to('cpu' ,non_blocking=True)
+                    v_cache_cpu = k_new.to('cpu' ,non_blocking=True)
+                q_cpu = q.detach().to('cpu' ,non_blocking=True)
+                # attention_mask_q_cpu = attention_mask_q.to('cpu') if attention_mask_q is not None else attention_mask_q 
               
-                v_cpu,s_cpu = mha_lse(q_cpu,k_cache_cpu,v_cache_cpu,attention_mask_q_cpu)
+                v_cpu,s_cpu = mha_lse(q_cpu,k_cache_cpu,v_cache_cpu,None)
             
             
             
@@ -468,7 +473,7 @@ class TorchDevice:
             #    Merge State    # 
             ##################### 
             
-            # self.cpu_stream.synchronize()
+          
             attn_output,_ = merge_state(v_cpu,s_cpu,v_gpu,s_gpu)
            
             
@@ -479,8 +484,8 @@ class TorchDevice:
             
             # subtract maximum value to improve numerical stability
             attn_weights = torch.matmul(q, k_cache_gpu.transpose(2, 3))  
-            # max_scores, _ = attn_weights.max(dim=-1, keepdim=True) 
-            # attn_weights = attn_weights - max_scores
+            max_scores, _ = attn_weights.max(dim=-1, keepdim=True) 
+            attn_weights = attn_weights - max_scores
             attn_weights = F.softmax(attn_weights, dim=-1, dtype=torch.float16).to(q.dtype)
             attn_output = torch.matmul(attn_weights, v_cache_gpu)
             attn_output = attn_output.transpose(1, 2).contiguous()

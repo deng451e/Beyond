@@ -474,22 +474,24 @@ class SelfAttention:
                 cpu_attn_size = self.KVCache_manager.cpu_attn_sizes[self.attn_layer_idx]
                  
             
-            
+            ############################################
+            # log kv stats 
             if self.attn_layer_idx==0:
                 info = f"GPU cache size: {k_cache_gpu.size(-2)}"
                 if k_cache_cpu is not None:  info +=  f" | CPU cache size: {k_cache_cpu.size(-2)}"
                 logger.info(info)
             ############################################
+
             mask, donate[1] = attention_mask.val.smart_copy(self.attention_compute)
             h, new_k_cache, new_v_cache = self.compute.mha_gen(h, mask, w_q,
                 b_q, w_k, b_k, w_v, b_v, w_out, b_out, w_ln, b_ln, n_head,
                 k_cache_gpu,v_cache_gpu,k_cache_cpu,v_cache_cpu, donate, self.policy.attn_sparsity,
                 self.policy.compress_cache, self.policy.comp_cache_config, cpu_attn_size,start_size)
         
-        kv_cache_2add = (new_k_cache, new_v_cache)
         
-        self.KVCache_manager.add_kv_cache_by_layer(self.attn_layer_idx, kv_cache_2add)
-        self.KVCache_manager.preload_layer_kv(self.attn_layer_idx,device=new_k_cache.device)
+         
+        self.KVCache_manager.add_kv_cache_by_layer(self.attn_layer_idx,  (new_k_cache, new_v_cache))
+         
         hidden.val = h
 
 

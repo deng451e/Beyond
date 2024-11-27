@@ -5,11 +5,11 @@ export CUDA_LAUNCH_BLOCKING=0 # Debug use
 export CUDA_VISIBLE_DEVICES=0 
 rm opt-1.3b-results.log
 model="huggingface/opt-1.3b"
-for prompt_len in  1024 #  500 600
+for prompt_len in 512 1024 #  500 600
     do 
-    for gen_len in  512
+    for gen_len in  256 512 1024
     do  
-        for bsz in 2 # 5 10   1 2 5
+        for bsz in 1 2  5# 5 10   1 2 5
         do
             cmd_="--model $model --percent 100 0 0 100 100 0  --gpu-batch-size $bsz \
             --num-gpu-batches 1 --prompt-len $prompt_len --gen-len $gen_len --warmup-input-path $flexgen_path/pg19_firstbook.txt \

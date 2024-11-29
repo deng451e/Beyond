@@ -226,8 +226,8 @@ if __name__ == "__main__":
     #          beyond            #
     ##############################
     if args.enable_beyond:
-        if os.path.exists("KV_cache_statics.log"): os.remove("KV_cache_statics.log")
-        logging.basicConfig(filename='KV_cache_statics.log', level=logging.INFO)  
+        # if os.path.exists("KV_cache_statics.log"): os.remove("KV_cache_statics.log")
+        # logging.basicConfig(filename='KV_cache_statics.log', level=logging.INFO)  
         from beyond.models.modify_opt import modify_opt_attention
         from beyond.KVcache_manager import KVCache_manager_
         if "llama" in model.config.model_type:
@@ -323,10 +323,10 @@ if __name__ == "__main__":
             if args.eval == "longbench_fast":
                 datasets = [
                     "multifieldqa_en",
-                    # "2wikimqa",
-                    # "lcc",
-                    # "samsum",
-                    # "multi_news",
+                    "2wikimqa",
+                    "lcc",
+                    "samsum",
+                    "multi_news",
                 ]
 
                 if args.evaluation_dataset is not None:

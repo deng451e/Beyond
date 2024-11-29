@@ -51,8 +51,8 @@ def eval(args):
             head_dim=config.hidden_size//config.num_attention_heads,
             num_heads=config.num_attention_heads,
             num_layers=config.num_hidden_layers,
-            gpu_cache_max=20000,
-            cpu_attn_size=2000 ,
+            gpu_cache_max=2000000,
+            cpu_attn_size=2000000,
             gpu_cache_device="cuda",
         )
         if args.config_file_path:
@@ -141,7 +141,7 @@ if __name__ == "__main__":
     logging.basicConfig(filename='KV_cache_statics.log', level=logging.INFO)
     parser = argparse.ArgumentParser()
     parser.add_argument("--start_size", type=int, default=4)
-    parser.add_argument("--recent_size", type=int, default=50) 
+    parser.add_argument("--recent_size", type=int, default=500) 
     parser.add_argument("--task", type=str, default="wikitext-2-raw-v1")
     parser.add_argument("--dataset_name", type=str, default="wikitext")
     parser.add_argument("--config_file_path", type=str, default=None)

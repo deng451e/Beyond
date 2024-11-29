@@ -95,7 +95,7 @@ def process_prompt(input, model, tokenizer, test_case: Dict, output_file: Option
     output = generated_ids
     # output = output[prompt_length:]
     output = tokenizer.batch_decode([output], skip_special_tokens=True)[0]
-    print(output)
+     
     # Matching the last digit of the model output
     response_number = re.findall("\d+", output)
     if response_number is not None and len(response_number) > 0:
@@ -137,6 +137,7 @@ if __name__ == "__main__":
     # define arguments
     parser = argparse.ArgumentParser()
     parser.add_argument("--enable_beyond", action="store_true")
+    parser.add_argument("--enable_streamllm", action="store_true")
      
     parser.add_argument("--model_name", type=str, default="lmsys/vicuna-7b-v1.5-16k" )
     parser.add_argument(
@@ -233,8 +234,8 @@ if __name__ == "__main__":
     #          beyond            #
     ##############################
     if args.enable_beyond:
-        if os.path.exists("KV_cache_statics.log"): os.remove("KV_cache_statics.log")
-        logging.basicConfig(filename='KV_cache_statics.log', level=logging.INFO)  
+        # if os.path.exists("KV_cache_statics.log"): os.remove("KV_cache_statics.log")
+        # logging.basicConfig(filename='KV_cache_statics.log', level=logging.INFO)  
         from beyond.models.modify_opt import modify_opt_attention
         from beyond.KVcache_manager import KVCache_manager_
         if "llama" in model.config.model_type:
@@ -263,6 +264,36 @@ if __name__ == "__main__":
         #     KVCache_manager = set_kv_manager_config(KVCache_manager,args.config_file_path)
         KVCache_manager.print_coverage()
         modify_attention(model,KVCache_manager)
+    ##############################
+    #        streamllm           #
+    ##############################
+    if  args.enable_streamllm:
+        from streaming_llm.kv_cache import StartRecentKVCache
+        kv_cache = StartRecentKVCache(
+            start_size=args.start_size,
+            recent_size=args.recent_size,
+            k_seq_dim=k_seq_dim,
+            v_seq_dim=v_seq_dim,
+        )
+        if "llama" in model.config.model_type:
+            from streaming_llm.pos_shift.modify_llama import enable_llama_pos_shift_attention
+
+            enable_llama_pos_shift_attention(model)
+    
+        elif "gpt_neox" in model.config.model_type:
+            from streaming_llm.pos_shift.modify_gpt_neox import (
+                enable_gpt_neox_pos_shift_attention,
+            )
+
+            enable_gpt_neox_pos_shift_attention(model)
+    
+
+    if args.enable_beyond:
+        args.output_dir = os.path.join(args.output_dir, "beyond/" )
+    elif args.enable_streamllm:
+        args.output_dir = os.path.join(args.output_dir, "streamllm/" )
+    else:
+        args.output_dir = os.path.join(args.output_dir, "normal/" )
 
 
     if model.generation_config.pad_token_id is None:
@@ -312,7 +343,7 @@ if __name__ == "__main__":
     
     context_length_range = [0.0]
     global_size = 4
-
+    
     os.makedirs(args.output_dir, exist_ok=True)
     
     for context_length in tqdm(context_length_range, position=0):
@@ -379,18 +410,17 @@ if __name__ == "__main__":
         # save and visualize
         df = pd.DataFrame(result_dict)
         df = df[df['context_length'] == context_length]
-        print(df)
-
+      
         output_dir = args.output_dir
-        # try:
-        #     df.to_csv(os.path.join(output_dir, f"test_result_{datetime_str}.csv"), index=False)
-        #     # plot everything
-        #     plot_correct_rate_heatmap_input_length_position(df, os.path.join(output_dir, f"correct_rate_heatmap_{datetime_str}.png"))
+        try:
+            df.to_csv(os.path.join(output_dir, f"test_result_{datetime_str}.csv"), index=False)
+            # plot everything
+            # plot_correct_rate_heatmap_input_length_position(df, os.path.join(output_dir, f"correct_rate_heatmap_{datetime_str}.png"))
 
-        #     plot_data_count_heatmap_input_length_position(df, os.path.join(output_dir, f"data_point_distribution_heatmap.png"))
-        # except:
-        #     print("error in saving the result")
-        #     pass
+            # plot_data_count_heatmap_input_length_position(df, os.path.join(output_dir, f"data_point_distribution_heatmap.png"))
+        except:
+            print("error in saving the result")
+            pass
      
     print("Retrieval Evaluation Finished")
     now = datetime.now()
@@ -405,11 +435,11 @@ if __name__ == "__main__":
     correct_rate = df['is_correct'].sum() / len(df)
     print(f"The overall correct rate is {correct_rate:.4f}")
 
-    # print(f"Saving the result to {args.output_dir}")
-    # output_dir = args.output_dir
+    print(f"Saving the result to {args.output_dir}")
+    output_dir = args.output_dir
     
-    # # plot everything
-    # df.to_csv(os.path.join(output_dir, f"test_result_{datetime_str}.csv"), index=False)
+    # plot everything
+    df.to_csv(os.path.join(output_dir, f"test_result_{datetime_str}.csv"), index=False)
     # plot_correct_rate_heatmap_input_length_position(df, os.path.join(output_dir, f"correct_rate_heatmap_{datetime_str}.png"))
     # plot_data_count_heatmap_input_length_position(df, os.path.join(output_dir, f"data_point_distribution_heatmap.png"))
 

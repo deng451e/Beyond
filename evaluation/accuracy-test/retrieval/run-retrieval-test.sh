@@ -4,11 +4,11 @@ export CUDA_VISIBLE_DEVICES=0
 
 rm local -r
 rm retrieval-test-results.log
-for method in  "streamllm" # "beyond" #  "normal"  "streamllm" 
+for method in      "beyond"   "normal"  "streamllm" 
 do
-    for model in   "lmsys/vicuna-7b-v1.5-16k"   #    "lmsys/vicuna-13b-v1.3"     "facebook/opt-6.7b"     "facebook/opt-1.3b" "facebook/opt-2.7b"   
+    for model in   "lmsys/vicuna-7b-v1.5-16k"        "lmsys/vicuna-13b-v1.3"     "facebook/opt-6.7b"     "facebook/opt-1.3b" "facebook/opt-2.7b"   
     do
-        echo "======================================="
+        
         cmd="python  retrieval_evaluate.py --model $model \
           --start_size 50\
           --recent_size 3000\

@@ -376,10 +376,7 @@ class TorchDevice:
                 w_out, b_out, w_ln, b_ln, n_head, k_cache_gpu,v_cache_gpu,k_cache_cpu,v_cache_cpu, donate,
                 attn_sparsity, compress_cache, comp_config, cpu_attn_size,start_size):
         """Multi-head attention (decoding phase)."""
-
-        ''''
-        k_cache_gpu,v_cache_gpu,k_cache_cpu,v_cache_cpu : torch.tensor 
-        '''
+ 
         # decompress weights
         if w_q.device.device_type == DeviceType.COMPRESSED:
             w_q = w_q.device.decompress(w_q)
@@ -437,7 +434,7 @@ class TorchDevice:
         # Mix CPU&GPU attention
         if k_cache_cpu is not None and cpu_attn_size!=0:
          
-            attention_mask_q = attention_mask  if q_len!=1 else None 
+            # attention_mask_q = attention_mask  if q_len!=1 else None 
             #####################
             #   CPU Attention   # 
             #####################
@@ -452,6 +449,7 @@ class TorchDevice:
                 else:
                     k_cache_cpu = k_new.to('cpu' ,non_blocking=True)
                     v_cache_cpu = k_new.to('cpu' ,non_blocking=True)
+
                 q_cpu = q.detach().to('cpu' ,non_blocking=True)
                 # attention_mask_q_cpu = attention_mask_q.to('cpu') if attention_mask_q is not None else attention_mask_q 
               
@@ -466,7 +464,7 @@ class TorchDevice:
              
             
         
-            v_gpu,s_gpu = mha_lse(q,k_cache_gpu,v_cache_gpu,attention_mask_q)
+            v_gpu,s_gpu = mha_lse(q,k_cache_gpu,v_cache_gpu,None)
             
             
             #####################

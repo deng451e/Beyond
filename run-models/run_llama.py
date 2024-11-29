@@ -158,7 +158,7 @@ if __name__ == "__main__":
     # parser.add_argument("--model_name_or_path", type=str, default="lmsys/vicuna-13b-v1.3")
     #
     parser.add_argument("--config_file_path", type=str, default=None)
-
+ 
 
     # parser.add_argument("--data_root", type=str, default="hakurei/open-instruct-v1")
     parser.add_argument("--data_root", type=str, default="data/mt_bench.jsonl")

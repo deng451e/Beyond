@@ -30,8 +30,7 @@ def greedy_generate(model, tokenizer, input_ids, past_key_values,KVCache_manager
     pred_token_idx = outputs.logits[:, -1, :].argmax(dim=-1).unsqueeze(1)
     generated_ids = [pred_token_idx.item()]
     pos = 0
-   
-    token_cnt = 0
+    
     for _ in range(max_gen_len - 1):
         outputs = model(
             input_ids=pred_token_idx,
@@ -40,7 +39,7 @@ def greedy_generate(model, tokenizer, input_ids, past_key_values,KVCache_manager
         )
         if enable_beyond:
             past_key_values = None 
-            KVCache_manager.copy_stream.synchronize()
+            # KVCache_manager.copy_stream.synchronize()
 
         else:
             past_key_values = outputs.past_key_values
@@ -64,14 +63,14 @@ def greedy_generate(model, tokenizer, input_ids, past_key_values,KVCache_manager
         now = len(generated_text) - 1
         
         if now > pos:
-            # print(" ".join(generated_text[pos:now]), end=" ", flush=True)
+            print(" ".join(generated_text[pos:now]), end=" ", flush=True)
             pos = now
 
         if pred_token_idx == tokenizer.eos_token_id:
           
             break
      
-    # print(" ".join(generated_text[pos:]), flush=True)
+    print(" ".join(generated_text[pos:now]), flush=True)
     return past_key_values,len(generated_text) 
 
 
@@ -101,7 +100,7 @@ def inference(model, tokenizer, prompts, KVCache_manager=None, max_gen_len=1000,
         memory.append(torch.cuda.max_memory_allocated(model.device)/ (1024 ** 3))
         throughputs.append(token_cnt/(time.time()-st))
 
-        print(f"idx:{idx},memory:{np.mean(memory):4},throughput:{np.mean(throughputs):4}")
+        logger.info(f"idx:{idx},memory:{np.mean(memory):4},throughput:{np.mean(throughputs):4}")
          
 def main(args):
     
@@ -162,19 +161,15 @@ def main(args):
 
 
 if __name__ == "__main__":
-    if os.path.exists("KV_cache_statics.log"): os.remove("KV_cache_statics.log")
-    logging.basicConfig(filename='KV_cache_statics.log', level=logging.INFO)
+    if os.path.exists("stats.log"): os.remove("stats.log")
+    logging.basicConfig(filename='stats.log', level=logging.INFO)
     
     parser = argparse.ArgumentParser()
     parser.add_argument("--start_size", type=int, default=4)
     parser.add_argument("--recent_size", type=int, default=10000) 
-    parser.add_argument("--model_name_or_path", type=str, default="lmsys/vicuna-7b-v1.5-16k")
-    # parser.add_argument("--model_name_or_path", type=str, default="lmsys/vicuna-13b-v1.3")
-    
+    parser.add_argument("--model_name_or_path", type=str, default="lmsys/vicuna-13b-v1.3")
     parser.add_argument("--config_file_path", type=str, default=None)
-
-    # parser.add_argument("--data_root", type=str, default="hakurei/open-instruct-v1")
     parser.add_argument("--data_root", type=str, default="data/mt_bench.jsonl")
-    parser.add_argument("--enable_beyond", action="store_true")
     args = parser.parse_args()
+    args.enable_beyond = True
     main(args)

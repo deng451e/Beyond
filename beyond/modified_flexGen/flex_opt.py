@@ -467,7 +467,7 @@ class SelfAttention:
             k_cache_gpu,v_cache_gpu,k_cache_cpu,v_cache_cpu = self.KVCache_manager(self.attn_layer_idx) # b,h,s,d
             torch.cuda.synchronize()
             # k_cache_gpu = k_cache_gpu.to(h.device.name)
-            # v_cache_gpu = v_cache_gpu.to(h.device.name)
+            # v_cache_gpu = v_cache_gpu.to(h.device.name) 
             cpu_attn_size = 0
             start_size  = self.KVCache_manager.start_sizes[self.attn_layer_idx]
             if k_cache_cpu is not None:

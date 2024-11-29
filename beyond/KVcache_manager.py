@@ -99,9 +99,9 @@ class KVCache_manager_:
        
         add_len   = k2add.size(self.k_seq_dim)
         gpu_cache_len = k_gpu.size(self.k_seq_dim) if k_gpu is not None else 0 
-         
         bound = min(self.recent_sizes[idx]+self.start_sizes[idx],self.gpu_cache_max)
         with torch.cuda.stream(self.copy_stream):
+
             ##################################################################################################
             # load next layer asynchronously to device 
             if self.gpu_cache_device=='cpu':
@@ -307,10 +307,10 @@ class KVCache_manager_:
 
     def print_coverage(self,idx=None):
         if idx is not None:
-            print(f"Layer {idx}: start size:{self.start_sizes[idx]}, recent_size: {self.recent_sizes[idx]}")
+                print(f"Layer {idx}: start_size:{self.start_sizes[idx]}, recent_size: {self.recent_sizes[idx]}, cpu_attn_size:{self.cpu_attn_sizes [idx]}")
         else:
             for idx in range( self.num_layers):
-                print(f"Layer {idx}: start size:{self.start_sizes[idx]}, recent_size: {self.recent_sizes[idx]}")
+                print(f"Layer {idx}: start_size:{self.start_sizes[idx]}, recent_size: {self.recent_sizes[idx]}, cpu_attn_size:{self.cpu_attn_sizes [idx]}")
 
         return 
 
@@ -474,7 +474,7 @@ def test_correctness(args,log):
     print("====================================")
   
     print(f"time taken:{time.time()-st}")
-    
+    print(KVCache_manager.blk_dim_min_max)
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--batch_size", type=int, default=10)

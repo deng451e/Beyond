@@ -15,6 +15,7 @@ from beyond.KVcache_manager import KVCache_manager_
 from beyond.attention_methods import (
     mha_lse_methods,
     merge_state_,
+    block_selection_,
 )
  
 logger = logging.getLogger(__name__)
@@ -78,11 +79,11 @@ def modified_llama_attention_forward(
 
     if k_cache_gpu is not None:
          
-        # if self.attn_layer_idx==0:
+        if self.attn_layer_idx==0:
              
-        #     info = f"GPU cache size: {k_cache_gpu.size(-2)}"
-        #     if k_cache_cpu is not None:  info +=  f" | CPU cache size: {k_cache_cpu.size(-2)}"
-        #     logger.info(info)
+            info = f"GPU cache size: {k_cache_gpu.size(-2)}"
+            if k_cache_cpu is not None:  info +=  f" | CPU cache size: {k_cache_cpu.size(-2)}"
+            logger.info(info)
             
 
         kv_seq_len += k_cache_gpu.size(-2) 
@@ -104,7 +105,7 @@ def modified_llama_attention_forward(
     q_position_ids = torch.arange(kv_seq_len-q_len,kv_seq_len,device=q_states.device).unsqueeze(0)
     q_states = apply_rotary_pos_emb_single(q_states, cos_gpu, sin_gpu, q_position_ids)
     
-     # Mix CPU&GPU attention
+     # Mix CPU & GPU attention
     if k_cache_cpu is not None and cpu_attn_size!=0:
     
        
@@ -114,12 +115,20 @@ def modified_llama_attention_forward(
         #   CPU Attention   # 
         #####################
         with torch.cuda.stream(self.cpu_stream):
+            q_cpu = q_states.detach().to('cpu')
+            # select outstanding kv entry 
+                    
+            k_blk_min,k_blk_max = self.KVCache_manager.blk_dim_min_max[self.attn_layer_idx]
+            blk_idx  = self.KVCache_manager.blk_idx[self.attn_layer_idx]
+           
+            selectd_k,selected_v  = self.block_selection(q_cpu,(k_blk_min,k_blk_max), blk_idx,(k_cache_cpu,v_cache_cpu),0,alpha=10)
+        
             
 
             # load appended token stats to CPU
         
-            k_cache_cpu = torch.cat([k_cache_cpu, k_states.to('cpu', non_blocking=True)], dim=2)
-            v_cache_cpu = torch.cat([v_cache_cpu, v_states.to('cpu', non_blocking=True)], dim=2)
+            k_cache_cpu = torch.cat([k_cache_cpu, k_states.to('cpu')], dim=2)
+            v_cache_cpu = torch.cat([v_cache_cpu, v_states.to('cpu')], dim=2)
             position_ids_cpu = torch.cat([  
                     torch.arange(start_size, start_size+cpu_attn_size, device='cpu'),
                     torch.arange(kv_seq_len-q_len, kv_seq_len, device='cpu')
@@ -127,14 +136,12 @@ def modified_llama_attention_forward(
            
             
             
-            q_cpu = q_states.detach().to('cpu', non_blocking=True)
-            attention_mask_q_cpu = attention_mask_q.to('cpu', non_blocking=True) if attention_mask_q is not None else attention_mask_q 
+             
+            attention_mask_q_cpu = attention_mask_q.to('cpu') if attention_mask_q is not None else attention_mask_q 
             
              
             cos_cpu, sin_cpu = self.rotary_emb_cpu(v_cache_cpu, seq_len=kv_seq_len)
-        
-            # v_cache_cpu = v_cache_cpu[:,:,-cpu_attn_size-q_len:,:]
-            # k_cache_cpu = k_cache_cpu[:,:,-cpu_attn_size-q_len:,:]
+       
             k_cache_cpu = apply_rotary_pos_emb_single(k_cache_cpu,  cos_cpu, sin_cpu, position_ids_cpu)
             
             
@@ -168,9 +175,9 @@ def modified_llama_attention_forward(
         #    Merge State    # 
         ##################### 
         
-        # self.cpu_stream.synchronize()
-        attn_output,_ = self.merge_state(v_cpu,s_cpu,v_gpu,s_gpu)
         # torch.cuda.synchronize()
+        attn_output,_ = self.merge_state(v_cpu,s_cpu,v_gpu,s_gpu)
+        
        
     # Default Full GPU attention
     else:   
@@ -233,7 +240,7 @@ def modify_llama_attention(model,KVCache_manager):
      
     cpu_stream = torch.cuda.Stream()
     copy_stream = torch.cuda.Stream()
-    KVCache_manager.copy_stream = copy_stream
+   
 
 
     if config.rope_scaling is None:
@@ -270,13 +277,12 @@ def modify_llama_attention(model,KVCache_manager):
             raise ValueError(f"Unknown RoPE scaling type {scaling_type}")
 
 
-
-
-
-    # rotary_emb_cpu = LlamaRotaryEmbedding(head_dim,device='cpu')
-    merge_state    = merge_state_(config.num_attention_heads)
-    mha_lse        = mha_lse_methods('llama')
- 
+    block_size = 200
+    KVCache_manager.copy_stream = copy_stream
+    KVCache_manager.block_size  = block_size
+    merge_state     = merge_state_(config.num_attention_heads)
+    mha_lse         = mha_lse_methods('llama')
+    block_selection = block_selection_(block_size,config.num_hidden_layers )
     def replace_layer(model):
         for name, module in reversed(model._modules.items()):
             if len(list(module.children())) > 0:
@@ -287,6 +293,7 @@ def modify_llama_attention(model,KVCache_manager):
                 model._modules[name].attn_layer_idx  = layer_idx
                 model._modules[name].rotary_emb_cpu  = rotary_emb_cpu
                 model._modules[name].merge_state  = merge_state
+                model._modules[name].block_selection  = block_selection
                 model._modules[name].mha_lse  = mha_lse
                 model._modules[name].KVCache_manager = KVCache_manager
                 model._modules[name].cpu_stream = cpu_stream

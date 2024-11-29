@@ -5,11 +5,11 @@ export CUDA_LAUNCH_BLOCKING=0 # Debug use
 export CUDA_VISIBLE_DEVICES=0 
 rm opt-6.7b-results.log
 model="huggingface/opt-6.7b"
-for prompt_len in 512 1024 #  500 600
+for prompt_len in   128 512 1024 #  500 600
     do 
-    for gen_len in  256 512 1024
+    for gen_len in  128 512 1024
     do  
-        for bsz in 1 2 5 # 5 10   1 2 5
+        for bsz in 1 # 5 10   1 2 5
         do
             cmd_="--model $model --percent 100 0 0 100 100 0  --gpu-batch-size $bsz \
             --num-gpu-batches 1 --prompt-len $prompt_len --gen-len $gen_len --warmup-input-path $flexgen_path/pg19_firstbook.txt \
@@ -21,7 +21,7 @@ for prompt_len in 512 1024 #  500 600
             rm $flexgen_path/flexgen/pytorch_backend.py
             ln -s  $home_path/beyond/modified_flexGen/flex_opt.py $flexgen_path/flexgen/flex_opt.py
             ln -s  $home_path/beyond/modified_flexGen/pytorch_backend.py $flexgen_path/flexgen/pytorch_backend.py
-            cmd=$cmd_" --overlap false --start_size 1 --recent_size 100"
+            cmd=$cmd_" --overlap false --start_size 1 --recent_size 30"
             outpt="==================================================================================="$'\n'
             outpt+="method: beyond, model: $model, intput:$prompt_len, output:$gen_len , bzs: $bsz"$'\n'
             # python -m flexgen.flex_opt $cmd 

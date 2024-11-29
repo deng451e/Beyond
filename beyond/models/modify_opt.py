@@ -219,10 +219,10 @@ def modified_opt_attention_forward(
 
     if k_cache_gpu is not None:
         
-        if self.attn_layer_idx==0:
-            info = f"GPU cache size: {k_cache_gpu.size(-2)}"
-            if k_cache_cpu is not None:  info +=  f" | CPU cache size: {k_cache_cpu.size(-2)}"
-            logger.info(info)
+        # if self.attn_layer_idx==0:
+        #     info = f"GPU cache size: {k_cache_gpu.size(-2)}"
+        #     if k_cache_cpu is not None:  info +=  f" | CPU cache size: {k_cache_cpu.size(-2)}"
+        #     logger.info(info)
             
 
         kv_seq_len += k_cache_gpu.size(-2) 
@@ -250,11 +250,11 @@ def modified_opt_attention_forward(
         #####################
         with torch.cuda.stream(self.cpu_stream):
             if q_len!=1:
-                k_cache_cpu = torch.cat([k_cache_cpu, k_states.to('cpu')], dim=2)
-                v_cache_cpu = torch.cat([v_cache_cpu, v_states.to('cpu')], dim=2)
-            q_cpu = q_states.detach().to('cpu')
+                k_cache_cpu = torch.cat([k_cache_cpu, k_states.to('cpu', non_blocking=True)], dim=2)
+                v_cache_cpu = torch.cat([v_cache_cpu, v_states.to('cpu', non_blocking=True)], dim=2)
+            q_cpu = q_states.detach().to('cpu', non_blocking=True)
 
-            attention_mask_q_cpu = attention_mask_q.to('cpu') if attention_mask_q is not None else attention_mask_q     
+            attention_mask_q_cpu = attention_mask_q.to('cpu', non_blocking=True) if attention_mask_q is not None else attention_mask_q     
             v_cpu,s_cpu = self.mha_lse(q_cpu,k_cache_cpu,v_cache_cpu,attention_mask_q_cpu)
          
         #####################   

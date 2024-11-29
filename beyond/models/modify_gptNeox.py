@@ -84,10 +84,10 @@ def modified_GPTNeoX_attention_forward(
     if k_cache_gpu is not None:
 
         
-        if self.attn_layer_idx==0:
-            info = f"GPU cache size: {k_cache_gpu.size(-2)}"
-            if k_cache_cpu is not None:  info +=  f" | CPU cache size: {k_cache_cpu.size(-2)}"
-            logger.info(info)
+        # if self.attn_layer_idx==0:
+        #     info = f"GPU cache size: {k_cache_gpu.size(-2)}"
+        #     if k_cache_cpu is not None:  info +=  f" | CPU cache size: {k_cache_cpu.size(-2)}"
+        #     logger.info(info)
 
         kv_seq_len += k_cache_gpu.size(-2) 
         k_cache_gpu = torch.cat([k_cache_gpu, k], dim=2)
@@ -113,8 +113,8 @@ def modified_GPTNeoX_attention_forward(
     q = torch.cat((q_rot, q_pass), dim=-1)
 
 
-  
-    if k_cache_cpu is not None:
+    # Mix CPU&GPU attention
+    if k_cache_cpu is not None  and cpu_attn_size!=0:
         q = q * self.norm_factor
         if kv_seq_len > self.bias.shape[-1]:
             self._init_bias(kv_seq_len, device=k.device)

@@ -21,7 +21,7 @@ for prompt_len in  1024 #  500 600
             rm $flexgen_path/flexgen/pytorch_backend.py
             ln -s  $home_path/beyond/modified_flexGen/flex_opt.py $flexgen_path/flexgen/flex_opt.py
             ln -s  $home_path/beyond/modified_flexGen/pytorch_backend.py $flexgen_path/flexgen/pytorch_backend.py
-            cmd=$cmd_" --overlap false --start_size 1 --recent_size 100"
+            cmd=$cmd_" --overlap false --start_size 1 --recent_size 10"
             outpt="==================================================================================="$'\n'
             outpt+="method: beyond, model: $model, intput:$prompt_len, output:$gen_len , bzs: $bsz"$'\n'
             # python -m flexgen.flex_opt $cmd 

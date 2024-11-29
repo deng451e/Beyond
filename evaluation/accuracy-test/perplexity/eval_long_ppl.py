@@ -137,8 +137,8 @@ def eval(args):
    
  
 if __name__ == "__main__":
-    if os.path.exists("KV_cache_statics.log"): os.remove("KV_cache_statics.log")
-    logging.basicConfig(filename='KV_cache_statics.log', level=logging.INFO)
+    # if os.path.exists("KV_cache_statics.log"): os.remove("KV_cache_statics.log")
+    # logging.basicConfig(filename='KV_cache_statics.log', level=logging.INFO)
     parser = argparse.ArgumentParser()
     parser.add_argument("--start_size", type=int, default=4)
     parser.add_argument("--recent_size", type=int, default=500) 

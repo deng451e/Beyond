@@ -47,7 +47,7 @@ def process_prompt(input, model, tokenizer, test_case: Dict, output_file: Option
     device = getattr(model, "device", "cpu")
     
   
-    input_ids =input.input_ids[:,:2000]
+    input_ids =input.input_ids#[:,:2000]
     past_key_values=None
  
     
@@ -103,7 +103,7 @@ def process_prompt(input, model, tokenizer, test_case: Dict, output_file: Option
     else:
         print(f"Got unparsable result")
         response_number = -1
-
+    # print(output)
     summary = f"Label: {expected_number}, Predict: {output}, Parsed: {response_number}".replace('\n', ' ')
     
     if output_file is not None:
@@ -230,6 +230,8 @@ if __name__ == "__main__":
     ).eval()
  
     KVCache_manager = None
+    k_seq_dim=2
+    v_seq_dim=2
     ##############################
     #          beyond            #
     ##############################
@@ -250,8 +252,8 @@ if __name__ == "__main__":
         KVCache_manager = KVCache_manager_(
             start_size=args.start_size,
             recent_size=args.recent_size,
-            k_seq_dim=2,
-            v_seq_dim=2,
+            k_seq_dim=k_seq_dim,
+            v_seq_dim=v_seq_dim,
             head_dim=config.hidden_size//config.num_attention_heads,
             num_heads=config.num_attention_heads,
             num_layers=config.num_hidden_layers,
@@ -430,7 +432,7 @@ if __name__ == "__main__":
 
     # visualize and save the results
     df = pd.DataFrame(result_dict)
-    print(df)
+    
 
     correct_rate = df['is_correct'].sum() / len(df)
     print(f"The overall correct rate is {correct_rate:.4f}")

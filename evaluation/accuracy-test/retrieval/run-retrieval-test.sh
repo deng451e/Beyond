@@ -2,7 +2,8 @@
 export CUDA_VISIBLE_DEVICES=0 
 
 
-rm retrieval-test-results.log 
+rm local -r
+rm retrieval-test-results.log
 for method in  "streamllm" # "beyond" #  "normal"  "streamllm" 
 do
     for model in   "lmsys/vicuna-7b-v1.5-16k"   #    "lmsys/vicuna-13b-v1.3"     "facebook/opt-6.7b"     "facebook/opt-1.3b" "facebook/opt-2.7b"   
@@ -19,9 +20,11 @@ do
         if [ "$method" == "streamllm" ];then
           cmd+=" --enable_streamllm"   
         fi 
-        $cmd
-        # outpt="model: $model, method: $method, "
-        # outpt+=$($cmd 2>&1 | grep -e "perplexity:" -e"latency:")
-        # echo "$outpt" | tee -a retrieval-test-results.log
+        SECONDS=0 
+        outpt="model: $model, method: $method, "
+        outpt+=$($cmd 2>&1 | grep -e "Accuracy:" )
+        outpt+="  Execution time: $SECONDS seconds"
+        echo "$outpt" | tee -a retrieval-test-results.log
+        
     done
 done 

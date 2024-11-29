@@ -47,7 +47,7 @@ def process_prompt(input, model, tokenizer, test_case: Dict, output_file: Option
     device = getattr(model, "device", "cpu")
     
   
-    input_ids =input.input_ids#[:,:2000]
+    input_ids =input.input_ids 
     past_key_values=None
  
     
@@ -423,7 +423,7 @@ if __name__ == "__main__":
         except:
             print("error in saving the result")
             pass
-     
+    print(f"Accuracy:{sum([1  for i in result_dict['is_correct']if i])/len(result_dict['is_correct'])}")
     print("Retrieval Evaluation Finished")
     now = datetime.now()
     datetime_str = now.strftime("%Y%m%d-%H%M")

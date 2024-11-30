@@ -474,20 +474,19 @@ class SelfAttention:
                 cpu_attn_size = self.KVCache_manager.cpu_attn_sizes[self.attn_layer_idx]
                  
             
-            ############################################
+            ###########################################
             # log kv stats 
-            if self.attn_layer_idx==0:
-                info = f"GPU cache size: {k_cache_gpu.size(-2)}"
-                if k_cache_cpu is not None:  info +=  f" | CPU cache size: {k_cache_cpu.size(-2)}"
-                logger.info(info)
-            ############################################
+            # if self.attn_layer_idx==0:
+            #     info = f"GPU cache size: {k_cache_gpu.size(-2)}"
+            #     if k_cache_cpu is not None:  info +=  f" | CPU cache size: {k_cache_cpu.size(-2)}"
+            #     logger.info(info)
+            ###########################################
 
             mask, donate[1] = attention_mask.val.smart_copy(self.attention_compute)
             h, new_k_cache, new_v_cache = self.compute.mha_gen(h, mask, w_q,
                 b_q, w_k, b_k, w_v, b_v, w_out, b_out, w_ln, b_ln, n_head,
                 k_cache_gpu,v_cache_gpu,k_cache_cpu,v_cache_cpu, donate, self.policy.attn_sparsity,
                 self.policy.compress_cache, self.policy.comp_cache_config, cpu_attn_size,start_size)
-        
         
          
         self.KVCache_manager.add_kv_cache_by_layer(self.attn_layer_idx,  (new_k_cache, new_v_cache))
@@ -1224,7 +1223,7 @@ def run_flexgen(args):
     num_prompts = args.num_gpu_batches * args.gpu_batch_size
     prompt_len, gen_len, cut_gen_len = args.prompt_len, args.gen_len, args.cut_gen_len
 
-    
+    torch.set_num_threads(32) 
     gpu = TorchDevice("cuda:0")
     cpu = TorchDevice("cpu")
     disk = TorchDisk(args.offload_dir)
@@ -1270,8 +1269,8 @@ def run_flexgen(args):
         head_dim=opt_config.hidden_size//opt_config.n_head,
         num_heads=opt_config.n_head,
         num_layers=opt_config.num_hidden_layers,
-        gpu_cache_max=2000,
-        cpu_attn_size=2000,
+        gpu_cache_max=20000,
+        cpu_attn_size=20000,
         copy_stream = torch.cuda.Stream(),
         gpu_cache_device="cpu",
     )
@@ -1280,30 +1279,35 @@ def run_flexgen(args):
      
     def add_module(model):
         for   module in reversed(model.layers):
+            # if isinstance(module, InputEmbed):
+            #     module.KVCache_manager = KVCache_manager
             if isinstance(module, SelfAttention):
     
                 global layer_idx
                 module.attn_layer_idx  = layer_idx
                 module.KVCache_manager = KVCache_manager
                 layer_idx -= 1  # layer are reverseved travesed 
-    add_module(model)
-    
 
+    torch.cuda.reset_peak_memory_stats()
+    add_module(model)
+    model_size = torch.cuda.max_memory_reserved("cuda:0") / 1024**2
     KVCache_manager.print_coverage()
     ###################################
-    
+     
     try:
         output_ids = model.generate( warmup_inputs, max_new_tokens=1, verbose=args.verbose)
         KVCache_manager.clear_kv_cache()
-         
+        torch.cuda.reset_peak_memory_stats()
         timers("generate").reset()
         output_ids = model.generate(
             inputs, max_new_tokens=args.gen_len,
             debug_mode=args.debug_mode, cut_gen_len=cut_gen_len, verbose=args.verbose)
         costs = timers("generate").costs
+        memory = (torch.cuda.max_memory_reserved("cuda:0") / 1024**2)-model_size
+        print(f"memory:{ memory:.4}")
     finally:
         env.close_copy_threads()
-
+     
     # Log output
     prefill_latency = costs[0]
     prefill_throughput = num_prompts * prompt_len / prefill_latency
@@ -1319,12 +1323,14 @@ def run_flexgen(args):
     _, cpu_peak_mem = cpu.mem_stats()
 
     projected = bool(args.debug_mode or cut_gen_len)
-
+     
+   
     print("+++++++++++++++++++++++++++++++++++++++++++++++++")
     print("Beyond")
     print("input: " + str(prompt_len) + " output: " + str(gen_len) + " bsz: " + str(num_prompts))
     print("+++++++++++++++++++++++++++++++++++++++++++++++++")
     print("Total: " + str(total_latency) + " Prefill: " + str(prefill_latency) + " Decode: " + str(decode_latency))
+     
     print("=================================================")
 
 def add_parser_arguments(parser):
@@ -1377,8 +1383,8 @@ def add_parser_arguments(parser):
     parser.add_argument("--test-input-path", type=str)
 
 if __name__ == "__main__":
-    if os.path.exists("KV_cache_statics.log"): os.remove("KV_cache_statics.log")
-    logging.basicConfig(filename='KV_cache_statics.log', level=logging.INFO)
+    # if os.path.exists("KV_cache_statics.log"): os.remove("KV_cache_statics.log")
+    # logging.basicConfig(filename='KV_cache_statics.log', level=logging.INFO)
     parser = argparse.ArgumentParser()
     add_parser_arguments(parser)
     args = parser.parse_args()

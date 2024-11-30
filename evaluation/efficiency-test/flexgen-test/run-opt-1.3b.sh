@@ -5,9 +5,9 @@ export CUDA_LAUNCH_BLOCKING=0 # Debug use
 export CUDA_VISIBLE_DEVICES=0 
 rm opt-1.3b-results.log
 model="huggingface/opt-1.3b"
-for prompt_len in  256 512 1024 #  500 600
+for prompt_len in  128 256 384 512 640 768 1024 #  500 600
     do 
-    for gen_len in  256 512 1024
+    for gen_len in  125 256
     do  
         for bsz in 1 #2  5 # 5 10   1 2 5
         do
@@ -24,9 +24,9 @@ for prompt_len in  256 512 1024 #  500 600
             cmd=$cmd_" --overlap false --start_size 1 --recent_size 30"
             outpt="==================================================================================="$'\n'
             outpt+="method: beyond, model: $model, intput:$prompt_len, output:$gen_len , bzs: $bsz"$'\n'
-            # python -m flexgen.flex_opt $cmd 
+             
             SECONDS=0 
-            outpt+=$( python -m flexgen.flex_opt $cmd 2>&1 | grep   -e"Total:" -e"Prefill:" -e"Decode:")
+            outpt+=$( python -m flexgen.flex_opt $cmd 2>&1 | grep   -e"Total:" -e"Prefill:" -e"Decode:" -e"memory:")
             outpt+="  Execution time: $SECONDS seconds"
             echo "$outpt"  | tee -a opt-1.3b-results.log
             
@@ -40,7 +40,7 @@ for prompt_len in  256 512 1024 #  500 600
             outpt="==================================================================================="$'\n'
             outpt+="method: infinigen, model: $model, intput:$prompt_len, output:$gen_len , bzs: $bsz"$'\n'
             SECONDS=0 
-            outpt+=$( python -m flexgen.flex_opt $cmd 2>&1 | grep   -e"Total:" -e"Prefill:" -e"Decode:")
+            outpt+=$( python -m flexgen.flex_opt $cmd 2>&1 | grep   -e"Total:" -e"Prefill:" -e"Decode:" -e"memory:")
             outpt+="  Execution time: $SECONDS seconds"
             echo "$outpt"  | tee -a opt-1.3b-results.log
             
@@ -55,7 +55,7 @@ for prompt_len in  256 512 1024 #  500 600
             outpt="==================================================================================="$'\n'
             outpt+="method: flexgen, model: $model, intput:$prompt_len, output:$gen_len , bzs: $bsz"$'\n' 
             SECONDS=0 
-            outpt+=$( python -m flexgen.flex_opt $cmd 2>&1 | grep   -e"Total:" -e"Prefill:" -e"Decode:")
+            outpt+=$( python -m flexgen.flex_opt $cmd 2>&1 | grep   -e"Total:" -e"Prefill:" -e"Decode:" -e"memory:")
             outpt+="  Execution time: $SECONDS seconds"
             echo "$outpt"  | tee -a opt-1.3b-results.log
             
@@ -69,7 +69,7 @@ for prompt_len in  256 512 1024 #  500 600
             outpt="==================================================================================="$'\n'
             outpt+="method: flexgen-overlap, model: $model, intput:$prompt_len, output:$gen_len , bzs: $bsz"$'\n'
             SECONDS=0 
-            outpt+=$( python -m flexgen.flex_opt $cmd 2>&1 | grep   -e"Total:" -e"Prefill:" -e"Decode:")
+            outpt+=$( python -m flexgen.flex_opt $cmd 2>&1 | grep   -e"Total:" -e"Prefill:" -e"Decode:" -e"memory:")
             outpt+="  Execution time: $SECONDS seconds"
             echo "$outpt"  | tee -a opt-1.3b-results.log
 
@@ -85,7 +85,7 @@ for prompt_len in  256 512 1024 #  500 600
             outpt="==================================================================================="$'\n'
             outpt+="method: h2o, model: $model, intput:$prompt_len, output:$gen_len , bzs: $bsz"$'\n'
             SECONDS=0 
-            outpt+=$( python -m flexgen.flex_opt $cmd 2>&1 | grep   -e"Total:" -e"Prefill:" -e"Decode:")
+            outpt+=$( python -m flexgen.flex_opt $cmd 2>&1 | grep   -e"Total:" -e"Prefill:" -e"Decode:" -e"memory:")
             outpt+="  Execution time: $SECONDS seconds"
             echo "$outpt"  | tee -a opt-1.3b-results.log
         

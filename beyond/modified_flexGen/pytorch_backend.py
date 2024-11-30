@@ -442,13 +442,13 @@ class TorchDevice:
                 
 
                 # load appended token stats to CPU
-                if q_len!=1:
+                # if q_len!=1:
                 
-                    k_cache_cpu = torch.cat([k_cache_cpu, k_new.to('cpu' ,non_blocking=True)], dim=2)
-                    v_cache_cpu = torch.cat([v_cache_cpu, v_new.to('cpu' ,non_blocking=True)], dim=2)
-                else:
-                    k_cache_cpu = k_new.to('cpu' ,non_blocking=True)
-                    v_cache_cpu = k_new.to('cpu' ,non_blocking=True)
+                #     k_cache_cpu = torch.cat([k_cache_cpu, k_new.to('cpu' ,non_blocking=True)], dim=2)
+                #     v_cache_cpu = torch.cat([v_cache_cpu, v_new.to('cpu' ,non_blocking=True)], dim=2)
+                # else:
+                #     k_cache_cpu = k_new.to('cpu' ,non_blocking=True)
+                #     v_cache_cpu = k_new.to('cpu' ,non_blocking=True)
 
                 q_cpu = q.detach().to('cpu' ,non_blocking=True)
                 # attention_mask_q_cpu = attention_mask_q.to('cpu') if attention_mask_q is not None else attention_mask_q 

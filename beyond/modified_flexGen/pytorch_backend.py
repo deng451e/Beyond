@@ -424,11 +424,9 @@ class TorchDevice:
         if k_cache_cpu is not None:
             cpu_attn_size = min(k_cache_cpu.size(-2) ,cpu_attn_size)
             kv_seq_len += cpu_attn_size
+             
             
-            
-        if attention_mask_ is not None: 
-            
-            attention_mask = attention_mask_.data[:,-q_len:] 
+        # mask = attention_mask = attention_mask_.data 
 
         
         # Mix CPU&GPU attention
@@ -440,17 +438,13 @@ class TorchDevice:
             #####################
             with torch.cuda.stream(self.cpu_stream):
                 
-
-                # load appended token stats to CPU
-                # if q_len!=1:
+ 
                 
-                #     k_cache_cpu = torch.cat([k_cache_cpu, k_new.to('cpu' ,non_blocking=True)], dim=2)
-                #     v_cache_cpu = torch.cat([v_cache_cpu, v_new.to('cpu' ,non_blocking=True)], dim=2)
-                # else:
-                #     k_cache_cpu = k_new.to('cpu' ,non_blocking=True)
-                #     v_cache_cpu = k_new.to('cpu' ,non_blocking=True)
+                # k_cache_cpu = torch.cat([k_cache_cpu, k_new.to('cpu'  )], dim=2)
+                # v_cache_cpu = torch.cat([v_cache_cpu, v_new.to('cpu'  )], dim=2)
+                
 
-                q_cpu = q.detach().to('cpu' ,non_blocking=True)
+                q_cpu = q.detach().to('cpu',non_blocking=True)
                 # attention_mask_q_cpu = attention_mask_q.to('cpu') if attention_mask_q is not None else attention_mask_q 
               
                 v_cpu,s_cpu = mha_lse(q_cpu,k_cache_cpu,v_cache_cpu,None)
@@ -461,8 +455,7 @@ class TorchDevice:
             #   GPU Attention   # 
             ##################### 
  
-             
-            
+              
         
             v_gpu,s_gpu = mha_lse(q,k_cache_gpu,v_cache_gpu,None)
             

@@ -464,19 +464,19 @@ class SelfAttention:
              
         else:  # decoding
             ############################################
-            k_cache_gpu,v_cache_gpu,k_cache_cpu,v_cache_cpu = self.KVCache_manager(self.attn_layer_idx) # b,h,s,d
-            torch.cuda.synchronize()
+            k_cache_gpu,v_cache_gpu,k_cache_cpu,v_cache_cpu = self.KVCache_manager(self.layer_id) # b,h,s,d
+            # torch.cuda.synchronize()
             # k_cache_gpu = k_cache_gpu.to(h.device.name)
             # v_cache_gpu = v_cache_gpu.to(h.device.name) 
             cpu_attn_size = 0
-            start_size  = self.KVCache_manager.start_sizes[self.attn_layer_idx]
+            start_size  = self.KVCache_manager.start_sizes[self.layer_id]
             if k_cache_cpu is not None:
-                cpu_attn_size = self.KVCache_manager.cpu_attn_sizes[self.attn_layer_idx]
+                cpu_attn_size = self.KVCache_manager.cpu_attn_sizes[self.layer_id]
                  
             
             ###########################################
             # log kv stats 
-            # if self.attn_layer_idx==0:
+            # if self.layer_id==0:
             #     info = f"GPU cache size: {k_cache_gpu.size(-2)}"
             #     if k_cache_cpu is not None:  info +=  f" | CPU cache size: {k_cache_cpu.size(-2)}"
             #     logger.info(info)
@@ -489,7 +489,7 @@ class SelfAttention:
                 self.policy.compress_cache, self.policy.comp_cache_config, cpu_attn_size,start_size)
         
          
-        self.KVCache_manager.add_kv_cache_by_layer(self.attn_layer_idx,  (new_k_cache, new_v_cache))
+        self.KVCache_manager.add_kv_cache_by_layer(self.layer_id,  (new_k_cache, new_v_cache))
          
         hidden.val = h
 
@@ -1248,8 +1248,7 @@ def run_flexgen(args):
     hidden_size = opt_config.hidden_bytes(num_prompts, prompt_len + gen_len)
     
      
-    model = OptLM(opt_config, env, args.path, policy)
-     
+    
     # Task and policy
     warmup_inputs = get_inputs(2048, num_prompts, tokenizer, args.warmup_input_path)
     inputs = get_inputs(prompt_len, num_prompts, tokenizer, args.test_input_path)
@@ -1275,7 +1274,7 @@ def run_flexgen(args):
         gpu_cache_device="cpu",
     )
     
-    layer_idx = opt_config.num_hidden_layers-1  
+ 
      
     def add_module(model):
         for   module in reversed(model.layers):
@@ -1283,14 +1282,14 @@ def run_flexgen(args):
             #     module.KVCache_manager = KVCache_manager
             if isinstance(module, SelfAttention):
     
-                global layer_idx
-                module.attn_layer_idx  = layer_idx
+                 
                 module.KVCache_manager = KVCache_manager
-                layer_idx -= 1  # layer are reverseved travesed 
+                 
 
     torch.cuda.reset_peak_memory_stats()
+    model = OptLM(opt_config, env, args.path, policy) 
+    model_size = torch.cuda.max_memory_allocated("cuda:0") / 1024**2
     add_module(model)
-    model_size = torch.cuda.max_memory_reserved("cuda:0") / 1024**2
     KVCache_manager.print_coverage()
     ###################################
      
@@ -1303,7 +1302,7 @@ def run_flexgen(args):
             inputs, max_new_tokens=args.gen_len,
             debug_mode=args.debug_mode, cut_gen_len=cut_gen_len, verbose=args.verbose)
         costs = timers("generate").costs
-        memory = (torch.cuda.max_memory_reserved("cuda:0") / 1024**2)-model_size
+        memory = (torch.cuda.max_memory_allocated("cuda:0") / 1024**2)-model_size
         print(f"memory:{ memory:.4}")
     finally:
         env.close_copy_threads()
@@ -1323,7 +1322,11 @@ def run_flexgen(args):
     _, cpu_peak_mem = cpu.mem_stats()
 
     projected = bool(args.debug_mode or cut_gen_len)
-     
+    
+    s1 = tokenizer.decode(output_ids[0][-gen_len:])
+    with open(f"results/beyond/{args.model.split('-')[-1]}_{num_prompts}_{prompt_len}_{gen_len}.txt", "w") as file:
+        file.write(s1)
+    
    
     print("+++++++++++++++++++++++++++++++++++++++++++++++++")
     print("Beyond")

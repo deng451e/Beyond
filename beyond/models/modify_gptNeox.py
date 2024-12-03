@@ -80,7 +80,7 @@ def modified_GPTNeoX_attention_forward(
 
     kv_seq_len = k.size(-2)
 
-    batch_size,  num_heads,q_len,head_dim =  q.size()
+    q_len =  q.size(2)
     if k_cache_gpu is not None:
 
         
@@ -118,9 +118,11 @@ def modified_GPTNeoX_attention_forward(
         q = q * self.norm_factor
         if kv_seq_len > self.bias.shape[-1]:
             self._init_bias(kv_seq_len, device=k.device)
-        attention_mask = self.bias[:, :, kv_seq_len - q_len : kv_seq_len, :kv_seq_len]
-        attention_mask = attention_mask.squeeze(0)[:,:,-q_len:]
-        attention_mask_q = attention_mask if q_len!=1 else None 
+        # attention_mask = self.bias[:, :, kv_seq_len - q_len : kv_seq_len, :kv_seq_len]
+        # attention_mask = attention_mask.squeeze(0)[:,:,-q_len:]
+        # attention_mask_q = attention_mask if q_len!=1 else None 
+        # print(attention_mask_q)
+        # if attention_mask_q is not None: print(attention_mask_q.shape)
         #####################
         #   CPU Attention   # 
         #####################
@@ -131,7 +133,7 @@ def modified_GPTNeoX_attention_forward(
             k_cache_cpu = torch.cat([k_cache_cpu, k.to('cpu', non_blocking=True)], dim=-2)
             v_cache_cpu = torch.cat([v_cache_cpu, v.to('cpu', non_blocking=True)], dim=-2)
             q_cpu =    q.detach().to('cpu', non_blocking=True)
-            attention_mask_q_cpu = attention_mask_q.to('cpu', non_blocking=True) if attention_mask_q is not None else attention_mask_q 
+            # attention_mask_q_cpu = attention_mask_q.to('cpu', non_blocking=True) if attention_mask_q is not None else attention_mask_q 
             
 
             cos_cpu, sin_cpu = self.rotary_emb_cpu(v_cache_cpu, seq_len=kv_seq_len)
@@ -147,7 +149,7 @@ def modified_GPTNeoX_attention_forward(
             k_cache_cpu =  torch.cat((k_rot_cpu,k_pass_cpu), dim=-1)
             
              
-            v_cpu,s_cpu = self.mha_lse(q_cpu,k_cache_cpu,v_cache_cpu,attention_mask_q_cpu)
+            v_cpu,s_cpu = self.mha_lse(q_cpu,k_cache_cpu,v_cache_cpu,None)
         
          
         
@@ -168,7 +170,7 @@ def modified_GPTNeoX_attention_forward(
         k_cache_gpu = torch.cat((k_rot,k_pass), dim=-1)
          
      
-        v_gpu,s_gpu = self.mha_lse(q,k_cache_gpu,v_cache_gpu,attention_mask_q)
+        v_gpu,s_gpu = self.mha_lse(q,k_cache_gpu,v_cache_gpu,None)
          
         
         #####################
@@ -193,7 +195,7 @@ def modified_GPTNeoX_attention_forward(
          
         k_cache_gpu = torch.cat((k_rot,k_pass), dim=-1)
       
-       
+     
         attn_output, attn_weights = self._attn(q,k_cache_gpu, v_cache_gpu, attention_mask, head_mask)
  
    

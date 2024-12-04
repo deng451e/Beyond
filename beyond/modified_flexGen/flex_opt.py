@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 from beyond.loading import * 
 from beyond.KVcache_manager import KVCache_manager_
  
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 ###########################
 
 fix_recursive_import()
@@ -1294,8 +1295,8 @@ def run_flexgen(args):
     ###################################
      
     try:
-        output_ids = model.generate( warmup_inputs, max_new_tokens=1, verbose=args.verbose)
-        KVCache_manager.clear_kv_cache()
+        # output_ids = model.generate( warmup_inputs, max_new_tokens=1, verbose=args.verbose)
+        # KVCache_manager.clear_kv_cache()
         torch.cuda.reset_peak_memory_stats()
         timers("generate").reset()
         output_ids = model.generate(
@@ -1326,8 +1327,6 @@ def run_flexgen(args):
     s1 = tokenizer.decode(output_ids[0][-gen_len:])
     with open(f"results/beyond/{args.model.split('-')[-1]}_{num_prompts}_{prompt_len}_{gen_len}.txt", "w") as file:
         file.write(s1)
-    
-   
     print("+++++++++++++++++++++++++++++++++++++++++++++++++")
     print("Beyond")
     print("input: " + str(prompt_len) + " output: " + str(gen_len) + " bsz: " + str(num_prompts))

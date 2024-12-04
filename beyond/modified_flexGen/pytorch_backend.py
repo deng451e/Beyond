@@ -372,7 +372,7 @@ class TorchDevice:
 
      
 
-    def mha_gen(self, inputs, attention_mask_, w_q, b_q, w_k, b_k, w_v, b_v,
+    def mha_gen(self, inputs, attention_mask, w_q, b_q, w_k, b_k, w_v, b_v,
                 w_out, b_out, w_ln, b_ln, n_head, k_cache_gpu,v_cache_gpu,k_cache_cpu,v_cache_cpu, donate,
                 attn_sparsity, compress_cache, comp_config, cpu_attn_size,start_size):
         """Multi-head attention (decoding phase)."""

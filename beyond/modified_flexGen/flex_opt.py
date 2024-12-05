@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 from beyond.loading import * 
 from beyond.KVcache_manager import KVCache_manager_
  
-os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+os.environ["CUDA_LAUNCH_BLOCKING"] = "0"
 ###########################
 
 fix_recursive_import()
@@ -467,6 +467,7 @@ class SelfAttention:
             ############################################
             k_cache_gpu,v_cache_gpu,k_cache_cpu,v_cache_cpu = self.KVCache_manager(self.layer_id) # b,h,s,d
             # torch.cuda.synchronize()
+            self.KVCache_manager.copy_stream.synchronize()
             # k_cache_gpu = k_cache_gpu.to(h.device.name)
             # v_cache_gpu = v_cache_gpu.to(h.device.name) 
             cpu_attn_size = 0
@@ -1211,11 +1212,17 @@ def get_inputs(prompt_len, num_prompts, tokenizer, path):
     prompts = []
     with open(path, 'r') as file:
         prompts.append(file.read())
-    input_ids = tokenizer(prompts, padding="max_length",
-                          max_length=prompt_len).input_ids
-    input_ids[0] = input_ids[0][:prompt_len]
-    return (input_ids[0],) * num_prompts
+    input_ids = tokenizer(prompts, padding="max_length" ).input_ids
+    print(len(input_ids[0]))
+    batch_input = ()
+    for idx in range(num_prompts):
+        start = idx+10
+        input = input_ids[0][start:start+prompt_len]
+        print(len(input))
+        batch_input +=  (input,)
+    return batch_input
 
+ 
 def run_flexgen(args):
     if args.model == "facebook/galactica-30b":
         tokenizer = AutoTokenizer.from_pretrained("facebook/galactica-30b", padding_side="left")
@@ -1224,7 +1231,7 @@ def run_flexgen(args):
     num_prompts = args.num_gpu_batches * args.gpu_batch_size
     prompt_len, gen_len, cut_gen_len = args.prompt_len, args.gen_len, args.cut_gen_len
 
-    torch.set_num_threads(32) 
+    torch.set_num_threads(args.num_thread) 
     gpu = TorchDevice("cuda:0")
     cpu = TorchDevice("cpu")
     disk = TorchDisk(args.offload_dir)
@@ -1295,8 +1302,8 @@ def run_flexgen(args):
     ###################################
      
     try:
-        # output_ids = model.generate( warmup_inputs, max_new_tokens=1, verbose=args.verbose)
-        # KVCache_manager.clear_kv_cache()
+        output_ids = model.generate( warmup_inputs, max_new_tokens=1, verbose=args.verbose)
+        KVCache_manager.clear_kv_cache()
         torch.cuda.reset_peak_memory_stats()
         timers("generate").reset()
         output_ids = model.generate(
@@ -1323,10 +1330,11 @@ def run_flexgen(args):
     _, cpu_peak_mem = cpu.mem_stats()
 
     projected = bool(args.debug_mode or cut_gen_len)
-    
-    s1 = tokenizer.decode(output_ids[0][-gen_len:])
     with open(f"results/beyond/{args.model.split('-')[-1]}_{num_prompts}_{prompt_len}_{gen_len}.txt", "w") as file:
-        file.write(s1)
+        for idx in range(num_prompts):
+            s = tokenizer.decode(output_ids[idx][-gen_len:])
+            file.write(s)
+
     print("+++++++++++++++++++++++++++++++++++++++++++++++++")
     print("Beyond")
     print("input: " + str(prompt_len) + " output: " + str(gen_len) + " bsz: " + str(num_prompts))
@@ -1336,6 +1344,7 @@ def run_flexgen(args):
     print("=================================================")
 
 def add_parser_arguments(parser):
+    parser.add_argument("--num_thread", type=int, default=64)
     parser.add_argument("--start_size", type=int, default=4)
     parser.add_argument("--recent_size", type=int, default=30)
     parser.add_argument("--model", type=str, default="facebook/opt-6.7b",

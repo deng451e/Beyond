@@ -12,10 +12,46 @@ logger = logging.getLogger(__name__)
 
  
  
-            
- 
- 
-             
+# class block_selection_:
+
+#     def __init__(self, blk_size, num_layers):
+#         """
+#         ICML 2024 Quest
+#         """
+#         self.blk_sizes = [blk_size for _ in range(num_layers)]
+
+#     def __call__(self, q, blk_dim_min_max, blk_idx, kv_cache, idx, topk):
+#         blk_size = self.blk_sizes[idx]
+#         k_min, k_max = blk_dim_min_max  # [b, h, blk_num, d]
+#         b, h, blk_num, d = k_min.size()
+#         k_cache, v_cache = kv_cache
+
+#         # Compute attention weights in parallel
+#         score_min = torch.einsum("bhid,bhjd->bhij", q, k_min)  # [b, h, 1, blk_num]
+#         score_max = torch.einsum("bhid,bhjd->bhij", q, k_max)  # [b, h, 1, blk_num]
+#         attn_weights = torch.maximum(score_min, score_max)  # [b, h, 1, blk_num]
+
+#         # Get top-k indices
+#         topk_indices = torch.topk(attn_weights, topk, dim=-1).indices  # [b, h, 1, topk]
+#         topk_indices = topk_indices.squeeze(2)  # [b, h, topk]
+
+#         # Convert blk_idx to tensor and prepare fetch indices
+#         blk_idx_tensor = torch.tensor(blk_idx, dtype=torch.long, device=k_cache.device)  # [blk_num, 2]
+#         start_indices = blk_idx_tensor[topk_indices, 0]  # [b, h, topk]
+#         end_indices = blk_idx_tensor[topk_indices, 1]  # [b, h, topk]
+
+#         # Generate ranges for selected blocks
+#         block_ranges = torch.cat([
+#             torch.arange(start, end, device=k_cache.device).unsqueeze(0)
+#             for start, end in zip(start_indices.flatten(), end_indices.flatten())
+#         ], dim=0).view(b, h, -1)  # [b, h, blk_size * topk]
+
+#         # Gather selected keys and values
+#         block_ranges = block_ranges.unsqueeze(-1).expand(-1, -1, -1, d)  # [b, h, blk_size * topk, d]
+#         selected_k = torch.gather(k_cache, 2, block_ranges)  # [b, h, blk_size * topk, d]
+#         selected_v = torch.gather(v_cache, 2, block_ranges)  # [b, h, blk_size * topk, d]
+
+#         return selected_k, selected_v
 class block_selection_:
 
     def __init__(self,blk_size,num_layers ):
@@ -35,7 +71,7 @@ class block_selection_:
         attn_weights = torch.where(score_max>score_min,score_max,score_min)
 
 
-        indices = torch.topk(attn_weights , topk,dim=-1)[1] #b,h,1,topk
+        indices = torch.topk(attn_weights , topk,dim=-1).indices # b,h,1,topk
         
         selected_v = torch.zeros(b,h,blk_size*topk,d).half()
         selected_k = torch.zeros(b,h,blk_size*topk,d).half()
@@ -52,6 +88,7 @@ class block_selection_:
         return selected_k,selected_v
         
   
+    
 # logSum attention methods 
 class mha_lse_methods:
     def __init__(self,methods ):
@@ -324,7 +361,7 @@ if __name__ == "__main__":
     
     parser.add_argument("--start_size", type=int, default=4)
     parser.add_argument("--recent_size", type=int, default=1000) 
-    parser.add_argument("--seq_len", type=int, default=10000)
+    parser.add_argument("--seq_len", type=int, default=100000)
     parser.add_argument("--q_len", type=int, default=1)
     parser.add_argument("--topk", type=int, default=10)
     parser.add_argument("--blk_size", type=int, default=100)

@@ -9,6 +9,7 @@ import time
 class KVCache_manager_:
     def __init__(
         self,
+        preload_stream=None,
         copy_stream=None,
         start_size=40,
         recent_size=1024,
@@ -32,8 +33,8 @@ class KVCache_manager_:
         self.k_slice = DIM_TO_SLICE[k_seq_dim]
         self.v_slice = DIM_TO_SLICE[v_seq_dim]
         self.num_layers = num_layers
-        self.copy_stream  =  copy_stream
-        
+        self.copy_stream    =  copy_stream
+        self.preload_stream = preload_stream
         #( k_gpu,v_gpu,k_cpu,v_cpu)
         self.kv_cache = [[None,None,None,None] for _ in range(num_layers)] 
         
@@ -100,16 +101,15 @@ class KVCache_manager_:
         add_len   = k2add.size(self.k_seq_dim)
         gpu_cache_len = k_gpu.size(self.k_seq_dim) if k_gpu is not None else 0 
         bound = min(self.recent_sizes[idx]+self.start_sizes[idx],self.gpu_cache_max)
+
+       
         with torch.cuda.stream(self.copy_stream):
 
             ##################################################################################################
-            # load next layer asynchronously to device 
+            # offload
             if self.gpu_cache_device=='cpu':
                 if k_gpu is not None:
                     k_gpu,v_gpu = k_gpu.to(self.gpu_cache_device, non_blocking=True),v_gpu.to(self.gpu_cache_device, non_blocking=True) 
-
-
-                self.preload_layer_kv(idx,k2add.device)
                 k2add,v2add = k2add.to(self.gpu_cache_device, non_blocking=True),v2add.to(self.gpu_cache_device, non_blocking=True) 
                 
             ##################################################################################################
@@ -294,15 +294,15 @@ class KVCache_manager_:
      
   
     def preload_layer_kv(self,idx,device='cuda'):
-         
-        idx = (idx+1)%(self.num_layers )
-        k_gpu,v_gpu,k_cpu,v_cpu = self.kv_cache[idx]
-        
-        if k_gpu is not None:
-            self.kv_cache[idx] = [k_gpu.to(device, non_blocking=True),v_gpu.to(device, non_blocking=True),k_cpu,v_cpu]
+        with torch.cuda.stream(self.preload_stream):
+            idx = (idx+1)%(self.num_layers )
+            k_gpu,v_gpu,k_cpu,v_cpu = self.kv_cache[idx]
+            
+            if k_gpu is not None:
+                self.kv_cache[idx] = [k_gpu.to(device ),v_gpu.to(device ),k_cpu,v_cpu]
         return 
+            
         
-    
     
 
     def print_coverage(self,idx=None):

@@ -184,7 +184,7 @@ class TorchDevice:
 
         # beyond features
         self.cpu_stream = torch.cuda.Stream()
-        self.event = torch.cuda.Event()
+        
 
 
         if self.device_type == DeviceType.CPU:
@@ -406,7 +406,7 @@ class TorchDevice:
        
 
           
-
+        
         kv_seq_len = q_len
         if k_cache_gpu is not None:
 
@@ -450,7 +450,7 @@ class TorchDevice:
                 # attention_mask_q_cpu = attention_mask_q.to('cpu') if attention_mask_q is not None else attention_mask_q 
               
                 v_cpu,s_cpu = mha_lse(q_cpu,k_cache_cpu,v_cache_cpu,None)
-                self.event.record()
+                
             
             
             #####################   
@@ -465,10 +465,10 @@ class TorchDevice:
             #####################
             #    Merge State    # 
             ##################### 
-            # self.cpu_stream.synchronize()
-             
+            self.cpu_stream.synchronize()
+            # torch.cuda.synchronize()
             attn_output,_ = merge_state(v_cpu,s_cpu,v_gpu,s_gpu)
-            torch.cuda.synchronize()
+             
 
             
             # Default Full GPU attention

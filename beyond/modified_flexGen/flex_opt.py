@@ -465,11 +465,13 @@ class SelfAttention:
              
         else:  # decoding
             ############################################
+             
             k_cache_gpu,v_cache_gpu,k_cache_cpu,v_cache_cpu = self.KVCache_manager(self.layer_id) # b,h,s,d
-            # torch.cuda.synchronize()
-            self.KVCache_manager.copy_stream.synchronize()
-            # k_cache_gpu = k_cache_gpu.to(h.device.name)
-            # v_cache_gpu = v_cache_gpu.to(h.device.name) 
+             
+            torch.cuda.synchronize()
+            # self.KVCache_manager.preload_stream.synchronize()
+            # self.KVCache_manager.copy_stream.synchronize()
+            
             cpu_attn_size = 0
             start_size  = self.KVCache_manager.start_sizes[self.layer_id]
             if k_cache_cpu is not None:
@@ -490,9 +492,9 @@ class SelfAttention:
                 k_cache_gpu,v_cache_gpu,k_cache_cpu,v_cache_cpu, donate, self.policy.attn_sparsity,
                 self.policy.compress_cache, self.policy.comp_cache_config, cpu_attn_size,start_size)
         
-         
+    
         self.KVCache_manager.add_kv_cache_by_layer(self.layer_id,  (new_k_cache, new_v_cache))
-         
+        self.KVCache_manager.preload_layer_kv(self.layer_id,h.device.name)
         hidden.val = h
 
 
@@ -1207,21 +1209,19 @@ def get_filename(args):
         filename += "-compc"
     return filename
 
-
 def get_inputs(prompt_len, num_prompts, tokenizer, path):
     prompts = []
     with open(path, 'r') as file:
         prompts.append(file.read())
     input_ids = tokenizer(prompts, padding="max_length" ).input_ids
-    print(len(input_ids[0]))
+   
     batch_input = ()
     for idx in range(num_prompts):
         start = idx+10
         input = input_ids[0][start:start+prompt_len]
-        print(len(input))
         batch_input +=  (input,)
     return batch_input
-
+ 
  
 def run_flexgen(args):
     if args.model == "facebook/galactica-30b":
@@ -1279,6 +1279,7 @@ def run_flexgen(args):
         gpu_cache_max=20000,
         cpu_attn_size=20000,
         copy_stream = torch.cuda.Stream(),
+        preload_stream = torch.cuda.Stream(),
         gpu_cache_device="cpu",
     )
     
@@ -1289,8 +1290,7 @@ def run_flexgen(args):
             # if isinstance(module, InputEmbed):
             #     module.KVCache_manager = KVCache_manager
             if isinstance(module, SelfAttention):
-    
-                 
+     
                 module.KVCache_manager = KVCache_manager
                  
 
@@ -1331,8 +1331,7 @@ def run_flexgen(args):
 
     projected = bool(args.debug_mode or cut_gen_len)
     with open(f"results/beyond/{args.model.split('-')[-1]}_{num_prompts}_{prompt_len}_{gen_len}.txt", "w") as file:
-        for idx in range(num_prompts):
-            s = tokenizer.decode(output_ids[idx][-gen_len:])
+            s = tokenizer.decode(output_ids[0][-gen_len:])
             file.write(s)
 
     print("+++++++++++++++++++++++++++++++++++++++++++++++++")
@@ -1344,7 +1343,7 @@ def run_flexgen(args):
     print("=================================================")
 
 def add_parser_arguments(parser):
-    parser.add_argument("--num_thread", type=int, default=64)
+    parser.add_argument("--num_thread", type=int, default=48)
     parser.add_argument("--start_size", type=int, default=4)
     parser.add_argument("--recent_size", type=int, default=30)
     parser.add_argument("--model", type=str, default="facebook/opt-6.7b",

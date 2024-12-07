@@ -4,7 +4,7 @@ from beyond.utils import *
 import numpy as np 
 import time 
 
-def mha(q,k_cache,v_cache,head_dim):
+def mha(q,k_cache,v_cache ):
     # Scaled dot-product attention
     attn_scores = torch.matmul(q,k_cache.transpose(-2, -1))  
     attn_weights = F.softmax(attn_scores, dim=-1)
@@ -55,7 +55,7 @@ def test(args,log):
     cuda_device = torch.device(args.device)
         
     # Calculate FLOPs
-    theoretical_attention_flops = calculate_actual_attention_flops(batch_size,q_len, seq_len, head_dim, num_heads)
+    theoretical_attention_flops = calculate_actual_attention_flops(batch_size,q_len, seq_len, num_heads,head_dim)
 
     k_dim   =  2
     k_cache = torch.randn(batch_size,num_heads,seq_len,head_dim, device='cpu').half().pin_memory()
@@ -96,7 +96,7 @@ def test(args,log):
             st = time.time()
             torch.cuda.synchronize()
 
-            _ = mha(q_cpu,k_cpu,v_cpu,head_dim)
+            _ = mha(q_cpu,k_cpu,v_cpu )
 
             torch.cuda.synchronize()
             cpu_t.append(time.time()-st)
@@ -116,7 +116,7 @@ def test(args,log):
             st = time.time() 
             torch.cuda.synchronize()
 
-            _ = mha(q_gpu,k_gpu ,v_gpu,head_dim)
+            _ = mha(q_gpu,k_gpu ,v_gpu )
             
             torch.cuda.synchronize()
             gpu_t.append(time.time()-st)
@@ -138,12 +138,16 @@ def test(args,log):
 
             k_load = torch.cat([k_cache.to(cuda_device),k ],dim=k_dim)
             v_load = torch.cat([v_cache.to(cuda_device),v ],dim=k_dim)
-            _ = mha(q_gpu,k_load ,v_load,head_dim)
+            _ = mha(q_gpu,k_load ,v_load )
             
 
             torch.cuda.synchronize()
             offload_t.append(time.time()-st)
-        
+            
+            del k_load
+            del v_load
+            torch.cuda.empty_cache()
+            
         out+=f"offload attention flops:{theoretical_attention_flops/np.mean(offload_t[5:]):.4}"
     
     print(out)

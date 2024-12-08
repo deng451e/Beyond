@@ -37,7 +37,7 @@ if __name__ == '__main__':
     # for batch_size in [1,10]:
     batch_size = 1 
     seq_len = [ 10, 50, 100, 500, 1000, 5000, 10000  ]
-    fig, axs = plt.subplots(1,2, figsize=(13, 3), sharex=True ) # , sharey=True
+    fig, axs = plt.subplots(1,2, figsize=(13, 4), sharex=True ) # , sharey=True
     axs = axs.flatten()
     for i,q_len in enumerate([1,32]):
              

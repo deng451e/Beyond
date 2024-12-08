@@ -114,7 +114,7 @@ def test(args,log):
         v_cpu = torch.cat([v_cache,v.cpu()],dim=k_dim) 
 
         cpu_t = []
-        for _ in range(args.repeat+5):
+        for _ in range(args.repeat+10):
             torch.cuda.synchronize()
             st = time.time()
              
@@ -127,20 +127,27 @@ def test(args,log):
             del output
             
 
-        out+=f"cpu attention flops:{theoretical_attention_flops/np.mean(cpu_t[5:]):.4}"
- 
+        out+=f"cpu attention flops:{theoretical_attention_flops/np.mean(cpu_t[10:]):.4}"
+        
 
     #####################
     #   GPU Attention   # 
     #####################
-    if args.test_gpu:
-         
+    elif args.test_gpu:
+        if args.test_hybrid:      
+            cut_thre    = int(args.ratio*seq_len)
+            slice = DIM_TO_SLICE[k_dim]
+          
+            k_gpu = slice(k_cache,cut_thre,seq_len).to(cuda_device)
+            v_gpu = slice(v_cache,cut_thre,seq_len).to(cuda_device)
+            theoretical_attention_flops = calculate_actual_attention_flops(batch_size,q_len, seq_len-cut_thre, num_heads,head_dim)
+
         q_gpu = q.to(cuda_device)
-        k_gpu = torch.cat([k_cache.to(cuda_device),k ],dim=k_dim)
-        v_gpu = torch.cat([v_cache.to(cuda_device),v ],dim=k_dim)
+        k_gpu = torch.cat([k_gpu.to(cuda_device),k ],dim=k_dim)
+        v_gpu = torch.cat([v_gpu.to(cuda_device),v ],dim=k_dim)
         gpu_t = []
 
-        for _ in range(args.repeat+5):
+        for _ in range(args.repeat+10):
             torch.cuda.synchronize()
             st = time.time() 
             
@@ -154,18 +161,18 @@ def test(args,log):
             torch.cuda.empty_cache()
 
     
-        out+=f"gpu attention flops:{theoretical_attention_flops/np.mean(gpu_t[5:]):.4}"
+        out+=f"gpu attention flops:{theoretical_attention_flops/np.mean(gpu_t[10:]):.4}"
         
     #####################
     # Load & Attenttion# 
     #####################
-    to_load_k = torch.cat([k_cache,k.cpu()],dim=k_dim).pin_memory()
-    to_load_v = torch.cat([v_cache,v.cpu()],dim=k_dim).pin_memory()
-    if args.test_offload:
-        
+    elif args.test_offload:
+       
+
+
         q_gpu = q.to(cuda_device)
         offload_t = []
-        for _ in range(args.repeat+5):
+        for _ in range(args.repeat+10):
             
             torch.cuda.synchronize()
             st = time.time() 
@@ -185,13 +192,13 @@ def test(args,log):
             del v_load
             torch.cuda.empty_cache()
 
-        out+=f"offload attention flops:{theoretical_attention_flops/np.mean(offload_t[5:]):.4}"
+        out+=f"offload attention flops:{theoretical_attention_flops/np.mean(offload_t[10:]):.4}"
 
 
     #####################
     # hybrid Attenttion # 
     #####################
-    if args.test_hybrid:
+    elif args.test_hybrid:
         
         merge_state = merge_state_(num_heads)
         cpu_stream  = torch.cuda.Stream()
@@ -208,7 +215,7 @@ def test(args,log):
         q_gpu = q.detach().to(cuda_device)
         offload_t = []
  
-        for _ in range(args.repeat+5):
+        for _ in range(args.repeat+10):
             
             torch.cuda.synchronize()
             st = time.time() 
@@ -218,7 +225,7 @@ def test(args,log):
                 o_cpu,s_cpu = mha_hybrid(q_cpu, k_cpu,v_cpu )
             
             o_gpu,s_gpu = mha_hybrid(q_gpu,k_gpu,v_gpu )
-            torch.cuda.synchronize()
+            # torch.cuda.synchronize()
             output,_ = merge_state(o_cpu,s_cpu,o_gpu,s_gpu)
             
 
@@ -229,7 +236,7 @@ def test(args,log):
              
             torch.cuda.empty_cache()
         out+=f"cpu ratio:{args.ratio},"
-        out+=f"hybrid attention flops:{theoretical_attention_flops/np.mean(offload_t[5:]):.4}"
+        out+=f"hybrid attention flops:{theoretical_attention_flops/np.mean(offload_t[10:]):.4}"
     
     print(out)
 

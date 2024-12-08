@@ -1,10 +1,10 @@
 rm  attention-achieved-flops.log
 
-for batch_size in 1 10   
+for batch_size in 1 10
 do 
-  for  q_len in  1 10  
+  for  q_len in 1 100
   do
-      for   seq_len in   100 500 1000 5000 10000 50000 1000000 500000 1000000
+      for   seq_len in   10 50 100 500 1000 5000 10000  
         do 
           
               
@@ -32,3 +32,5 @@ do
       done
   done
 done 
+
+ 

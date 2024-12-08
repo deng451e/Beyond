@@ -1,6 +1,6 @@
 rm  hybrid-attention-flops.log
 
-for seq_len in   500 1000 5000 10000 50000 100000
+for seq_len in      10000 50000 100000 500000 1000000 5000000
 do 
 
        

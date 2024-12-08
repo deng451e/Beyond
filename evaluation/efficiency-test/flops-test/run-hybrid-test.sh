@@ -1,13 +1,13 @@
 rm  hybrid-attention-flops.log
 
-for seq_len in 100 500 1000 5000 10000 100000
+for seq_len in   500 1000 5000 10000 50000 100000
 do 
 
        
 
         
 
-        for  ratio in 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9  
+        for  ratio in 0.01 0.05 0.1  0.15 0.2 0.25 0.3 0.35 0.4 0.45 0.5
         do 
             CMD_="--q_len 1    --batch_size 1 --seq_len $seq_len --ratio $ratio "
                 

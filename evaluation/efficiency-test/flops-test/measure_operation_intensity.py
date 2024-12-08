@@ -17,7 +17,7 @@ def mha_hybrid_cpu(q,k_cache,v_cache ):
     attn_weights = exp_scores / sum_exp_scores 
     
     
-    value  = torch.bmm(attn_weights, v_cache).permute(1,0,2).half().contiguous()
+    value  = torch.bmm(attn_weights, v_cache).permute(1,0,2).contiguous()
     log_sum = log_sum.squeeze(-1).permute(1,0).contiguous().float() 
     return  value.pin_memory(),log_sum.pin_memory()
     
@@ -32,7 +32,7 @@ def mha_hybrid_gpu(q,k_cache,v_cache ):
     attn_weights = exp_scores / sum_exp_scores 
     
     
-    value  = torch.bmm(attn_weights, v_cache).permute(1,0,2).half().contiguous()
+    value  = torch.bmm(attn_weights, v_cache).permute(1,0,2) .contiguous()
     log_sum = log_sum.squeeze(-1).permute(1,0).contiguous().float() 
     return  value, log_sum
  
@@ -44,7 +44,7 @@ def mha(q,k_cache,v_cache ):
     sum_exp_scores = exp_scores.sum(dim=-1, keepdim=True)
     attn_weights = exp_scores / sum_exp_scores 
    
-    value  = torch.bmm(attn_weights, v_cache).permute(1,0,2).half().contiguous()
+    value  = torch.bmm(attn_weights, v_cache).permute(1,0,2).contiguous()
     
     return  value
  
@@ -129,6 +129,7 @@ def test(args,log):
             k_cpu = slice(k_cache, cut_thre,seq_len ) 
             v_cpu = slice(v_cache, cut_thre,seq_len ) 
             theoretical_attention_flops = calculate_actual_attention_flops(batch_size,q_len, seq_len-cut_thre, num_heads,head_dim)
+            
             k_cpu = torch.cat([k_cpu ,k.cpu() ],dim=k_dim)
             v_cpu = torch.cat([v_cpu ,v.cpu() ],dim=k_dim)
             out+=f"ratio:{args.ratio}, "
@@ -152,7 +153,7 @@ def test(args,log):
 
             del output
             
-
+       
         out+=f"cpu attention flops:{theoretical_attention_flops/np.mean(cpu_t[10:]):.4}"
         
 
@@ -191,7 +192,7 @@ def test(args,log):
              
             torch.cuda.empty_cache()
 
-    
+       
         out+=f"gpu attention flops:{theoretical_attention_flops/np.mean(gpu_t[10:]):.4}"
         
     #####################
@@ -231,7 +232,7 @@ def test(args,log):
     #####################
     elif args.test_hybrid:
         
-       
+        import flashinfer
             
         merge_state = merge_state_(num_heads)
         cpu_stream  = torch.cuda.Stream()
@@ -256,20 +257,21 @@ def test(args,log):
 
           
             
-            with torch.cuda.stream(gpu_stream):
-                o_gpu,s_gpu = mha_hybrid_gpu(q_gpu,k_gpu,v_gpu )
+            # with torch.cuda.stream(gpu_stream):
+            o_gpu,s_gpu = mha_hybrid_gpu(q_gpu,k_gpu,v_gpu )
             o_cpu,s_cpu = mha_hybrid_cpu(q_cpu, k_cpu,v_cpu )
+            # torch.cuda.synchronize()
+            # output = merge_state(o_cpu,s_cpu,o_gpu,s_gpu)
+            # flashinfer.merge_state_in_place(o_cpu,s_cpu,o_gpu,s_gpu)
+            v_out,s_out = flashinfer.merge_state(  o_cpu,s_cpu,o_gpu,s_gpu)
+             
             torch.cuda.synchronize()
-            output = merge_state(o_cpu,s_cpu,o_gpu,s_gpu)
-            # flashinfer.merge_state_in_place(va,sa,vb,sb)
-            # v_out,s_out = flashinfer.merge_state(  va,sa,vb,sb)
 
-            torch.cuda.synchronize()
             offload_t.append(time.time()-st)
 
-            del output
+            # del output
              
-            torch.cuda.empty_cache()
+            torch.cuda.empty_cache() 
         out+=f"cpu ratio:{args.ratio},"
         out+=f"hybrid attention flops:{theoretical_attention_flops/np.mean(offload_t[10:]):.4}"
     

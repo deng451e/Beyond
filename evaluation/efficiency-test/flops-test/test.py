@@ -1,30 +1,34 @@
 import torch
 import time
 
-# Create a custom CUDA stream
+# Create custom CUDA stream
 gpu_stream = torch.cuda.Stream()
-cpu_stream = torch.cuda.Stream()
-# Dummy CPU task: Simulating a computationally intensive task
- 
-# Dummy GPU task: Matrix multiplication on the GPU
+
+# Dummy CPU work
+def cpu_task():
+    print("CPU task started")
+    result = sum(i**2 for i in range(10**6))  # Simulate heavy computation
+    print("CPU task completed, result:", result)
+
+# GPU work
 def gpu_task():
-    print("GPU task started")
-    start_time = time.time()
-
-    for _ in range(10000):
-        a = torch.randn(10000, 10000, device='cuda')
-        b = torch.randn(10000, 10000, device='cuda')
-        result = torch.mm(a, b)  # Matrix multiplication
+    a = torch.randn(10000, 10000, device='cuda')
+    b = torch.randn(10000, 10000, device='cuda')
+    with torch.cuda.stream(gpu_stream):
+        for _ in range(100):  # Smaller loop for demonstration
+            result = torch.mm(a, b)
     print("GPU task queued")
-    print(f"GPU task queued in {time.time() - start_time:.3f} seconds")
 
-# Measure total time
+# Measure time
 start_time = time.time()
 
-# Start CPU and GPU tasks asynchronously
-with torch.cuda.stream(gpu_stream):  #
-    gpu_task()  # GPU computation (queued asynchronously)
-print("CPU task started")
+# Start GPU task
+gpu_task()
+
+# Start CPU task in parallel
+cpu_task()
+
+# Wait for GPU to finish
 gpu_stream.synchronize()
 
-print(f"Total execution time: {time.time() - start_time:.3f} seconds")
+print(f"Total time: {time.time() - start_time:.2f} seconds")

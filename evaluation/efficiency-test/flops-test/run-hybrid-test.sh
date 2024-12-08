@@ -11,12 +11,14 @@ do
         do 
             CMD_="--q_len 1    --batch_size 1 --seq_len $seq_len --ratio $ratio "
                 
-            
+            CMD=$CMD_" --test_cpu  --test_hybrid "
+            outpt=$(python  measure_operation_intensity.py  $CMD    2>&1  )  
+            echo "$outpt" | tee -a hybrid-attention-flops.log
                   
             CMD=$CMD_" --test_gpu  --test_hybrid "
             outpt=$(python  measure_operation_intensity.py  $CMD    2>&1  )  
             echo "$outpt" | tee -a hybrid-attention-flops.log
-            
+
             CMD=$CMD_" --test_hybrid  "
             outpt=$(python  measure_operation_intensity.py  $CMD    2>&1  )  
             echo "$outpt" | tee -a hybrid-attention-flops.log

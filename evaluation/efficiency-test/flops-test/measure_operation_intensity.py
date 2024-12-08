@@ -108,10 +108,22 @@ def test(args,log):
     #   CPU Attention   # 
     #####################
     if args.test_cpu:
-       
+        if args.test_hybrid:      
+            cut_thre    = int(args.ratio*seq_len)
+            slice = DIM_TO_SLICE[k_dim]
+          
+            k_cpu = slice(k_cache,0,cut_thre ) 
+            v_cpu = slice(v_cache,0,cut_thre) 
+            theoretical_attention_flops = calculate_actual_attention_flops(batch_size,q_len, cut_thre, num_heads,head_dim)
+            k_cpu = torch.cat([k_cpu ,k.cpu() ],dim=k_dim)
+            v_cpu = torch.cat([v_cpu ,v.cpu() ],dim=k_dim)
+            out+=f"ratio:{args.ratio}, "
+        else:
+            k_cpu = torch.cat([k_cache,k.cpu()],dim=k_dim) 
+            v_cpu = torch.cat([v_cache,v.cpu()],dim=k_dim) 
+
         q_cpu = q.cpu()
-        k_cpu = torch.cat([k_cache,k.cpu()],dim=k_dim) 
-        v_cpu = torch.cat([v_cache,v.cpu()],dim=k_dim) 
+        
 
         cpu_t = []
         for _ in range(args.repeat+10):
@@ -141,10 +153,15 @@ def test(args,log):
             k_gpu = slice(k_cache,cut_thre,seq_len).to(cuda_device)
             v_gpu = slice(v_cache,cut_thre,seq_len).to(cuda_device)
             theoretical_attention_flops = calculate_actual_attention_flops(batch_size,q_len, seq_len-cut_thre, num_heads,head_dim)
-
+            k_gpu = torch.cat([k_gpu.to(cuda_device),k ],dim=k_dim)
+            v_gpu = torch.cat([v_gpu.to(cuda_device),v ],dim=k_dim)
+            out+=f"ratio:{args.ratio}, "
+        else:
+            k_gpu = torch.cat([k_cache.to(cuda_device),k ],dim=k_dim)
+            v_gpu = torch.cat([v_cache.to(cuda_device),v ],dim=k_dim)
         q_gpu = q.to(cuda_device)
-        k_gpu = torch.cat([k_gpu.to(cuda_device),k ],dim=k_dim)
-        v_gpu = torch.cat([v_gpu.to(cuda_device),v ],dim=k_dim)
+       
+         
         gpu_t = []
 
         for _ in range(args.repeat+10):
@@ -206,7 +223,7 @@ def test(args,log):
         cut_thre    = int(args.ratio*seq_len)
         slice = DIM_TO_SLICE[k_dim]
         k_cpu = torch.cat([slice(k_cache, 0,cut_thre),k.cpu()],dim=k_dim)
-        v_cpu = torch.cat([slice(v_cache, 0,cut_thre),k.cpu()],dim=k_dim)
+        v_cpu = torch.cat([slice(v_cache, 0,cut_thre),v.cpu()],dim=k_dim)
 
         k_gpu = torch.cat([slice(k_cache,cut_thre,seq_len).to(cuda_device),k ] ,dim=k_dim)    
         v_gpu = torch.cat([slice(v_cache,cut_thre,seq_len).to(cuda_device),v ] ,dim=k_dim)
@@ -214,7 +231,7 @@ def test(args,log):
         q_cpu = q.detach().to('cpu',non_blocking=True)
         q_gpu = q.detach().to(cuda_device)
         offload_t = []
- 
+        
         for _ in range(args.repeat+10):
             
             torch.cuda.synchronize()

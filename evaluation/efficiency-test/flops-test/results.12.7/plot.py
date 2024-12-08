@@ -37,7 +37,7 @@ if __name__ == '__main__':
     # for batch_size in [1,10]:
     batch_size = 1 
     seq_len = [ 10, 50, 100, 500, 1000, 5000, 10000  ]
-    fig, axs = plt.subplots(1,2, figsize=(12, 2), sharex=True ) # , sharey=True
+    fig, axs = plt.subplots(1,2, figsize=(13, 3), sharex=True ) # , sharey=True
     axs = axs.flatten()
     for i,q_len in enumerate([1,32]):
              
@@ -60,7 +60,7 @@ if __name__ == '__main__':
                 axs[i].plot(x, y3, marker='^',c='black', label='Load & GPU  Append 32')
 
             # axs[i].set_xlabel('KV Cache Length')
-            axs[0].set_ylabel('Achieved Attention FLOPs', fontsize=12)
+            axs[0].set_ylabel('Achieved Attention FLOPs', fontsize=16)
 
              
             axs[i].spines['top'].set_visible(False)
@@ -70,15 +70,28 @@ if __name__ == '__main__':
             axs[i].set_xticks(x)
             # xlabel = [f"{ss}/{2*ss*4096*2/1024**2.:.4}"for ss in seq_len]
             # print(xlabel)
-            axs[i].set_xticklabels(seq_len, rotation=0)
+            axs[i].set_xticklabels(seq_len, rotation=0 , fontsize=12)
+            axs[i].set_yticklabels(y2,  fontsize=12)
             axs[i].set_yscale("log")
     
+
+    # Collect legend handles and labels from all subplots
+    handles, labels = [], []
+    for ax in axs:
+        h, l = ax.get_legend_handles_labels()
+        handles.extend(h)
+        labels.extend(l)
+    print(labels)
+    # Reorder the labels and handles
+    order = [0,3,1,4,2,5]  # Desired order of the labels (indices in the list)
+    handles = [handles[i] for i in order]
+    labels = [labels[i] for i in order]
     # plt.tight_layout()
     # axs[0].legend(loc='upper left', ncol=3,frameon=False, bbox_to_anchor=(0, 1.1) )
-    fig.legend(frameon=False, loc='upper center', ncol=6, bbox_to_anchor=(0.55, 1.2) )
+    fig.legend(handles, labels,frameon=False, loc='upper center', ncol=3, bbox_to_anchor=(0.51, 1.2) , fontsize=14)
 
-    fig.text(0.55, 0.04, 'KV Cache Length' , ha='center', va='center' , fontsize=12)  # Common y label , fontsize=12
-    # fig.text(0.04, 0.5,  'Achieved Attention Flops', ha='center', va='center', rotation='vertical', fontsize=12)  # Common x label
+    fig.text(0.55, 0.04, 'KV Cache Length' , ha='center', va='center' , fontsize=16)  # Common y label , fontsize=16
+    # fig.text(0.04, 0.5,  'Achieved Attention Flops', ha='center', va='center', rotation='vertical', fontsize=16)  # Common x label
     plt.tight_layout(rect=[0.05, 0.05, 1, 1])
     plt.savefig(f'gpu-4090-cpu-6430.pdf', bbox_inches='tight')
 

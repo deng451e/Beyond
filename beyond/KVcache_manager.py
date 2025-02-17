@@ -6,6 +6,44 @@ import asyncio
 import time 
  
 
+class block_selection_:
+
+    def __init__(self,blk_size,num_layers ):
+        """
+        ICML 2024 Quest 
+        """
+        self.blk_sizes = [blk_size for _ in range(num_layers)]
+        
+   
+    def __call__(self,q,blk_dim_min_max, blk_idx,kv_cache,idx,topk):
+        blk_size = self.blk_sizes[idx]
+        k_min,k_max = blk_dim_min_max #b,h,blk_num,d
+        b,h, blk_num,d = k_min.size()
+        k_cache,v_cache = kv_cache 
+        score_min =  torch.matmul(q , k_min.transpose(2, 3) ) #b,h,1,blk_num
+        score_max =  torch.matmul(q , k_max.transpose(2, 3) ) #b,h,1,blk_num
+        attn_weights = torch.where(score_max>score_min,score_max,score_min)
+
+
+        indices = torch.topk(attn_weights , topk,dim=-1).indices # b,h,1,topk
+        
+        selected_v = torch.zeros(b,h,blk_size*topk,d).half()
+        selected_k = torch.zeros(b,h,blk_size*topk,d).half()
+        
+        for b_idx  in range(b):
+            for h_idx in range(h):
+                index_holder = indices[b_idx,h_idx,0,:]
+             
+                fetch_idx = torch.cat([torch.arange(blk_idx[ind][0],blk_idx[ind][1])  for ind in index_holder],dim=0)
+                selected_k[b_idx,h_idx,:fetch_idx.size(-1),:] = k_cache[b_idx,h_idx,fetch_idx,:]
+                selected_v[b_idx,h_idx,:fetch_idx.size(-1),:] = v_cache[b_idx,h_idx,fetch_idx,:]
+                 
+                 
+        return selected_k,selected_v
+        
+  
+
+
 class KVCache_manager_:
     def __init__(
         self,

@@ -1,11 +1,8 @@
 
 import torch  
- 
-import argparse
-import os.path as osp
-import re
 import pandas as pd
-
+ 
+  
 # Define a function to parse the file
 def parse_file(filename):
     data = []

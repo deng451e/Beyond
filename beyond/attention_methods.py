@@ -205,9 +205,7 @@ class AttnMethods(nn.Module):
         self.model   =  config.model_type
         self.head_num = config.num_attention_heads
         self.head_dim = config.hidden_size//self.head_num 
-        self.max_position_embeddings = config.max_position_embeddings
         self.batch_size = batch_size
-        self.num_key_value_groups =  None
         self.enable_pos = enable_pos
          
           
@@ -221,10 +219,12 @@ class AttnMethods(nn.Module):
             self.hybrid_mha = torch.jit.script(self.hybrid_mha_wo_pos)  
         
 
-    def merge_state(self,out_gpu,lse_gpu,out_cpu,lse_cpu):
+    def merge_state(self,out_gpu: torch.Tensor,lse_gpu: torch.Tensor,
+                         out_cpu: torch.Tensor,lse_cpu: torch.Tensor)-> torch.Tensor:
         
         bh = out_gpu.size(1)
         
+        # merge appaned states 
         if out_gpu.size(0)!=1:
             out = torch.empty_like(out_gpu)
             out_cpu,lse_cpu = out_cpu.to(out_gpu.device),lse_cpu.to(out_gpu.device)
@@ -234,7 +234,7 @@ class AttnMethods(nn.Module):
                 vb,sb = out_cpu[:,st:ed,:].contiguous(),lse_cpu[:,st:ed].contiguous()
                 out[:,st:ed,:],_ = flashinfer.merge_state(va,sa,vb,sb)
                                                                         
-                 
+        # merge decode states    
         else:
             out_gpu,lse_gpu = out_gpu.contiguous(),lse_gpu.contiguous()
             out_cpu,lse_cpu = out_cpu.contiguous(),lse_cpu.contiguous()
@@ -282,10 +282,8 @@ class AttnMethods(nn.Module):
    
         
         # launch gpu attn 
-        k = k.view(-1,qs,head_dim)
-        v = v.view(-1,qs,head_dim)
-        k_gpu = torch.cat([k_cache_gpu,k],dim=-2)
-        v_gpu = torch.cat([v_cache_gpu,v],dim=-2)
+        k_gpu = torch.cat([k_cache_gpu,k.view(-1,qs,head_dim)],dim=-2)
+        v_gpu = torch.cat([v_cache_gpu,v.view(-1,qs,head_dim)],dim=-2)
         
         out_gpu,lse_gpu = mha_lse(q ,k_gpu,v_gpu,enable_mask,mask,cos_gpu,sin_gpu,pos_ids_gpu,enable_mask,mask)
         
@@ -328,8 +326,7 @@ class AttnMethods(nn.Module):
        
         
         # launch gpu attn 
-        # k = k.view(-1,qs,head_dim)
-        # v = v.view(-1,qs,head_dim)
+      
         k_gpu = torch.cat([k_cache_gpu,k.view(-1,qs,head_dim)],dim=-2)
         v_gpu = torch.cat([v_cache_gpu,v.view(-1,qs,head_dim)],dim=-2)
 
@@ -381,13 +378,13 @@ class AttnMethods(nn.Module):
    
         
         if mask:
-            mask = torch.tensor(0)
+            mask = torch.tensor(0,device=q.device)
             enable_mask = True  
         else:
             enable_mask = False  
         
         
-        if k_cache_cpu is not None:
+        if k_cache_cpu:
             if self.enable_pos:
                 out_gpu,lse_gpu,out_cpu,lse_cpu = self.hybrid_mha(q,k,v,k_cache_gpu , v_cache_gpu ,k_cache_cpu , v_cache_cpu, 
                                                                   cos_gpu, sin_gpu, cos_cpu , sin_cpu , pos_ids_gpu , pos_ids_cpu ,enable_mask,mask )
@@ -399,15 +396,15 @@ class AttnMethods(nn.Module):
             
         else:
                 
-            q = q.view(-1,qs,head_dim)
-            k = k.view(-1,qs,head_dim)
-            v = v.view(-1,qs,head_dim)
-            k_gpu = torch.cat([k_cache_gpu,k],dim=-2)
-            v_gpu = torch.cat([v_cache_gpu,v],dim=-2)
-            enable_pos = True if sin_gpu else False 
-             
-            out = self.mha(q,k_gpu,v_gpu,enable_pos,cos_gpu, sin_gpu,pos_ids_gpu,enable_mask,mask).reshape(-1,self.head_num,qs,self.head_dim)
-          
+            q = q.view(-1,qs,self.head_dim)
+            if k_cache_gpu:
+                k_gpu = torch.cat([k_cache_gpu,k.view(-1,qs,self.head_dim)],dim=-2)  
+                v_gpu = torch.cat([v_cache_gpu,v.view(-1,qs,self.head_dim)],dim=-2)  
+            else:
+                k_gpu = k.view(-1,qs,self.head_dim)
+                v_gpu = v.view(-1,qs,self.head_dim)
+            out = self.mha(q,k_gpu,v_gpu,self.enable_pos,cos_gpu, sin_gpu,pos_ids_gpu,enable_mask,mask).reshape(-1,self.head_num,qs,self.head_dim)
+        
        
         return out
  
@@ -570,7 +567,7 @@ if __name__ == "__main__":
     parser.add_argument("--qs", type=int, default=2)
     parser.add_argument("--head_split_num", type=int, default=8)
     parser.add_argument("--repeat", type=int, default=100)
-    parser.add_argument("--batch_size", type=int, default=10)
+    parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--model_name", type=str, default= "facebook/opt-66b")
     args = parser.parse_args()
 

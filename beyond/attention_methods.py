@@ -1,352 +1,551 @@
-import torch  
-import torch.nn.functional as F
 import flashinfer 
-import argparse
-import time 
-from beyond.utils import *
-
- 
-import logging 
-
-logger = logging.getLogger(__name__)
-
+import torch 
+import torch.nn as nn
+from torch.jit import fork, wait
+from typing import List,Tuple,Optional
  
  
-# class block_selection_:
+ 
+def mha_lse( q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, 
+            cos: torch.Tensor, sin:  torch.Tensor, pos_ids: torch.Tensor,
+            enable_mask: bool, mask: torch.Tensor) -> Tuple[torch.Tensor,torch.Tensor]:
 
-#     def __init__(self, blk_size, num_layers):
-#         """
-#         ICML 2024 Quest
-#         """
-#         self.blk_sizes = [blk_size for _ in range(num_layers)]
-
-#     def __call__(self, q, blk_dim_min_max, blk_idx, kv_cache, idx, topk):
-#         blk_size = self.blk_sizes[idx]
-#         k_min, k_max = blk_dim_min_max  # [b, h, blk_num, d]
-#         b, h, blk_num, d = k_min.size()
-#         k_cache, v_cache = kv_cache
-
-#         # Compute attention weights in parallel
-#         score_min = torch.einsum("bhid,bhjd->bhij", q, k_min)  # [b, h, 1, blk_num]
-#         score_max = torch.einsum("bhid,bhjd->bhij", q, k_max)  # [b, h, 1, blk_num]
-#         attn_weights = torch.maximum(score_min, score_max)  # [b, h, 1, blk_num]
-
-#         # Get top-k indices
-#         topk_indices = torch.topk(attn_weights, topk, dim=-1).indices  # [b, h, 1, topk]
-#         topk_indices = topk_indices.squeeze(2)  # [b, h, topk]
-
-#         # Convert blk_idx to tensor and prepare fetch indices
-#         blk_idx_tensor = torch.tensor(blk_idx, dtype=torch.long, device=k_cache.device)  # [blk_num, 2]
-#         start_indices = blk_idx_tensor[topk_indices, 0]  # [b, h, topk]
-#         end_indices = blk_idx_tensor[topk_indices, 1]  # [b, h, topk]
-
-#         # Generate ranges for selected blocks
-#         block_ranges = torch.cat([
-#             torch.arange(start, end, device=k_cache.device).unsqueeze(0)
-#             for start, end in zip(start_indices.flatten(), end_indices.flatten())
-#         ], dim=0).view(b, h, -1)  # [b, h, blk_size * topk]
-
-#         # Gather selected keys and values
-#         block_ranges = block_ranges.unsqueeze(-1).expand(-1, -1, -1, d)  # [b, h, blk_size * topk, d]
-#         selected_k = torch.gather(k_cache, 2, block_ranges)  # [b, h, blk_size * topk, d]
-#         selected_v = torch.gather(v_cache, 2, block_ranges)  # [b, h, blk_size * topk, d]
-
-#         return selected_k, selected_v
-class block_selection_:
-
-    def __init__(self,blk_size,num_layers ):
-        """
-        ICML 2024 Quest 
-        """
-        self.blk_sizes = [blk_size for _ in range(num_layers)]
+    k,v = apply_pos_emb(k,v,pos_ids,cos,sin )
+    k = k.permute(0,2,1) 
         
-   
-    def __call__(self,q,blk_dim_min_max, blk_idx,kv_cache,idx,topk):
-        blk_size = self.blk_sizes[idx]
-        k_min,k_max = blk_dim_min_max #b,h,blk_num,d
-        b,h, blk_num,d = k_min.size()
-        k_cache,v_cache = kv_cache 
-        score_min =  torch.matmul(q , k_min.transpose(2, 3) ) #b,h,1,blk_num
-        score_max =  torch.matmul(q , k_max.transpose(2, 3) ) #b,h,1,blk_num
-        attn_weights = torch.where(score_max>score_min,score_max,score_min)
-
-
-        indices = torch.topk(attn_weights , topk,dim=-1).indices # b,h,1,topk
-        
-        selected_v = torch.zeros(b,h,blk_size*topk,d).half()
-        selected_k = torch.zeros(b,h,blk_size*topk,d).half()
-        
-        for b_idx  in range(b):
-            for h_idx in range(h):
-                index_holder = indices[b_idx,h_idx,0,:]
-             
-                fetch_idx = torch.cat([torch.arange(blk_idx[ind][0],blk_idx[ind][1])  for ind in index_holder],dim=0)
-                selected_k[b_idx,h_idx,:fetch_idx.size(-1),:] = k_cache[b_idx,h_idx,fetch_idx,:]
-                selected_v[b_idx,h_idx,:fetch_idx.size(-1),:] = v_cache[b_idx,h_idx,fetch_idx,:]
-                 
-                 
-        return selected_k,selected_v
-        
-  
+    A = q@k 
+    if enable_mask:
+        A = masking(A,mask)   
+    A_max, _ = A.max(dim=-1, keepdim=True) 
+    A  = A - A_max
     
-# logSum attention methods 
-class mha_lse_methods:
-    def __init__(self,methods ):
-        self.methods = methods
-        
-    def __call__(self, q,k,v,attention_mask=None):
-        
-        #shape: b,h,s,d
-        batch_size,num_heads,qs,head_dim = q.size()
-         
-        q = q.reshape(batch_size  * num_heads, -1,  head_dim)   # bh,qs,d
-        k = k.permute(0,1,3,2).reshape(batch_size  * num_heads, head_dim, -1) # bh,d,s
-        v = v.reshape(batch_size  * num_heads, -1, head_dim) # bh,s,d
-        attn_weights = torch.bmm(q,k)   # bh,qs,s 
-      
-        max_scores, _ = attn_weights.max(dim=-1, keepdim=True) 
-        attn_weights  = attn_weights - max_scores
-        # model attention differs by masking mechanism
-        
-        if attention_mask is not None:
-            match self.methods:
+    e = torch.exp2(A).to(v.dtype)
+    se = e.sum(dim=-1, keepdim=True)
+    
+    out = ((e / se) @ v).permute(1,0,2) 
+    lse = (torch.log2(se) + A_max).squeeze(-1).permute(1,0).float() 
+    
+    return out,lse
 
-                case "llama":
-                    attn_weights[:,:,-qs:] = attn_weights[:,:,-qs:] + attention_mask # bh,qs,s 
+ 
+def mha_lse_wo_pos( q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, 
+                    enable_mask: bool, mask: torch.Tensor) -> Tuple[torch.Tensor,torch.Tensor]:
+    
 
-                case "opt":
-                    
-                    attn_weights[:,:,-qs:] = attn_weights[:,:,-qs:] + attention_mask 
-                    attn_weights = torch.max(attn_weights, torch.tensor(torch.finfo(attn_weights.dtype).min, device=attn_weights.device))
-                    attn_weights = attn_weights.to(torch.float32)
-                case "gpt-neox":
-                    mask_value = torch.finfo(attn_weights.dtype).min
-                    mask_value = torch.tensor(mask_value, dtype=attn_weights.dtype).to( attn_weights.device)
-                    attn_weights[:,:,-qs:] = torch.where(attention_mask, attn_weights[:,:,-qs:], mask_value)
-                case "flexgen-opt":
-                    
-                     
-                    attn_weights = torch.where(attention_mask, attn_weights[:,:,-qs:], -1e4)
-
-         
-        exp_scores = torch.exp(attn_weights).to(v.dtype)
-        sum_exp_scores = exp_scores.sum(dim=-1, keepdim=True)
-        log_sum = (torch.log(sum_exp_scores)  + max_scores) * torch.tensor(1.4427) 
-        attn_weights = exp_scores / sum_exp_scores 
-        #attn_weights = attn_weights.to(v.dtype)
+    k = k.permute(0,2,1) 
         
-        value  = torch.bmm(attn_weights, v).permute(1,0,2).half().contiguous()
-        log_sum = log_sum.squeeze(-1).permute(1,0).contiguous().float() 
-        
+    A = q@k  
+    if enable_mask:
        
-        if check_tensor_device(q,'cpu'):  return  value.pin_memory(),log_sum.pin_memory()
-        if check_tensor_device(q,'cuda'): return  value, log_sum
+        A = masking(A,mask)   
+    
+    A_max, _ = A.max(dim=-1, keepdim=True) 
+    A  = A - A_max
+    
+    e = torch.exp2(A).to(v.dtype)
+    se = e.sum(dim=-1, keepdim=True)
+    
+    out = ((e / se) @ v).permute(1,0,2) 
+    lse = (torch.log2(se) + A_max).squeeze(-1).permute(1,0).float() 
+    
+    return out,lse
+
+ 
+
+def masking_(config):
+        
+    match config.model_type:
+ 
+        case "llama":
+            def fn(A,A_mask):
+                qs = A.size(1)
+                A[:,:,-qs:] = A[:,:,-qs:] + A_mask  
+                return  A
+
+        case "opt":
+            def fn(A,A_mask):
+                qs = A.size(1)
+                A[:,:,-qs:] = A[:,:,-qs:] + A_mask 
+                A = torch.max(A, torch.tensor(-65504.0, device=A.device))
+                A = A.to(torch.float32)
+                return A
+
+        case "gpt-neox":
+            def fn(A,A_mask):
+                qs = A.size(1)
+                mask_value  = torch.finfo(A.dtype).min
+                mask_value  = torch.tensor(mask_value, dtype=A.dtype).to( A.device)
+                A[:,:,-qs:] = torch.where(A_mask, A[:,:,-qs:], mask_value)
+                return A
+        case "flexgen-opt":
+            def fn(A,A_mask):
+                qs = A.size(1)
+                A  = torch.where(A_mask, A[:,:,-qs:], -1e4)
+                return A
             
+    return fn
+
+
+def get_pos_emb_cache_(config):
+    head_num = config.num_attention_heads
+    head_dim = config.hidden_size/head_num 
+   
+    match  config.model_type:
+
+        case "llama":
+          
+            scaling_type = config.rope_scaling["type"]
+            scaling_factor = config.rope_scaling["factor"]
+            if scaling_type == "linear":
+                from transformers.models.llama.modeling_llama import LlamaLinearScalingRotaryEmbedding
+                cpu_pos_emb_cache = LlamaLinearScalingRotaryEmbedding(
+                    head_dim,
+                    max_position_embeddings=config.max_position_embeddings,
+                    scaling_factor=scaling_factor,
+                    base=config.rope_theta,
+                    device='cpu'
+                )
+            elif scaling_type == "dynamic":
+                from transformers.models.llama.modeling_llama import LlamaDynamicNTKScalingRotaryEmbedding
+                cpu_pos_emb_cache = LlamaDynamicNTKScalingRotaryEmbedding(
+                    head_dim,
+                    max_position_embeddings=config.max_position_embeddings,
+                    scaling_factor=scaling_factor,
+                    base=config.rope_theta,
+                    device='cpu'
+                )
+
+          
+
+        case  "gpt-neox":
+            from transformers.models.gpt_neox.modeling_gpt_neox import GPTNeoXRotaryEmbedding 
+            cpu_pos_emb_cache = GPTNeoXRotaryEmbedding(
+                int(head_dim * config.rotary_pct),
+                max_position_embeddings=config.max_position_embeddings,
+                device='cpu')
+           
+        case "opt":
+            cpu_pos_emb_cache = None
+            
+
+        case "flexgen-opt":
+            cpu_pos_emb_cache = None
+ 
+    return  cpu_pos_emb_cache
+
+
+def apply_pos_emb_(config):
+    
+    head_num = config.num_attention_heads
+    head_dim = config.hidden_size/head_num 
+   
+    match  config.model_type:
+
+        case "llama":
+            from transformers.models.llama.modeling_llama import  rotate_half, repeat_kv
+
+            num_key_value_groups = config.model_type.head_num // config.num_key_value_heads
+            def apply_rotary_pos_emb_single(x, cos, sin, position_ids):
+                
+                cos = cos.squeeze(1).squeeze(0)       # [seq_len, dim]
+                sin = sin.squeeze(1).squeeze(0)       # [seq_len, dim]
+                cos = cos[position_ids]               # [bs, seq_len, dim]
+                sin = sin[position_ids]               # [bs, seq_len, dim]
+                x_embed = (x * cos) + (rotate_half(x) * sin)
+                return x_embed
+            
+                
+            def fn(k,v,pos_ids,cos ,sin ):
+                k = apply_rotary_pos_emb_single(k,  cos, sin, pos_ids)
+                k = repeat_kv(k,  num_key_value_groups)
+                v = repeat_kv(v,  num_key_value_groups)
+                return k,v
+
+        case  "gpt-neox":
+            from transformers.models.gpt_neox.modeling_gpt_neox import rotate_half
+            rotary_ndims = int(head_dim * config.rotary_pct)
+
+           
+            def apply_rotary_pos_emb_single(x, cos, sin, position_ids):
+                gather_indices = position_ids[:, None, :, None]  # [bs, 1, seq_len, 1]
+                gather_indices = gather_indices.repeat(1, cos.shape[1], 1, cos.shape[3])
+                cos = torch.gather(cos.repeat(gather_indices.shape[0], 1, 1, 1), 2, gather_indices)
+                sin = torch.gather(sin.repeat(gather_indices.shape[0], 1, 1, 1), 2, gather_indices)
+                x_embed = (x * cos) + (rotate_half(x) * sin)
+                return x_embed
+            
+            def fn(k,v,pos_ids,cos,sin):
+                k_rot  = k[..., : rotary_ndims]
+                k_pass = k[..., rotary_ndims :]
+                k_rot  = apply_rotary_pos_emb_single(k_rot,  cos, sin, pos_ids)
+                k = torch.cat((k_rot,k_pass), dim=-1)
+                return k,v
+
+
+        case "opt":
+            def fn(k,v,pos_ids,cos,sin):
+                return k,v
+                 
+
+        case "flexgen-opt":
+            def fn(k,v,pos_ids,cos,sin):
+                return k,v
+            
+    return fn 
+    
+ 
     
 
- 
-#wrapper for flashinfer merge state functions 
-class merge_state_:
-    def __init__(self,num_heads,in_place=False):
-        self.num_heads = num_heads
-        self.in_place = in_place
+
+class AttnMethods(nn.Module):
+
+    def __init__(self,batch_size,config,enable_pos=False):
+        super(AttnMethods,self).__init__()
+        
+        self.model   =  config.model_type
+        self.head_num = config.num_attention_heads
+        self.head_dim = config.hidden_size//self.head_num 
+        self.max_position_embeddings = config.max_position_embeddings
+        self.batch_size = batch_size
+        self.num_key_value_groups =  None
+        self.enable_pos = enable_pos
          
-    def __call__(self, va,sa,vb,sb):
-        """
-        Input shape: s,h,d or s,bh,d
-        """
-        assert check_tensor_device(va,'cpu') , f"va should be on CPU"
-        assert check_tensor_device(sa,'cpu') , f"sa should be on CPU"
-        assert check_tensor_device(vb,'cuda') , f"vb should be on GPU"
-        assert check_tensor_device(sb,'cuda') , f"sb should be on GPU"
-        assert va.is_pinned() and va.is_contiguous(), f"va should be on pinned and contiguous"
-        assert sa.is_pinned() and va.is_contiguous(), f"sa should be on pinned and contiguous"
- 
-        head_dim = va.size(-1)
+          
+
+        self.merge_split_dim  =  8192//self.head_dim
+      
+        self.mha    = torch.jit.script(self.mha_)  
+        if self.enable_pos:
+            self.hybrid_mha = torch.jit.script(self.hybrid_mha_pos)
+        else:
+            self.hybrid_mha = torch.jit.script(self.hybrid_mha_wo_pos)  
         
+
+    def merge_state(self,out_gpu,lse_gpu,out_cpu,lse_cpu):
         
-        """
-        The maximum compute capability of the NVIDIA GPU is 1024 threads per block. 
-        Therefore, we partition the batch&head dimension accordingly.
-        """
-        partitions_dim = 7680//head_dim
-        if partitions_dim<va.size(-2):
-            v_out,s_out = [],[]
-            num_partition = (va.size(-2)+partitions_dim-1)//partitions_dim
-            for i in range(num_partition):
-                start,end = i*partitions_dim,min((i+1)*partitions_dim,va.size(-2))
+        bh = out_gpu.size(1)
+        
+        if out_gpu.size(0)!=1:
+            out = torch.empty_like(out_gpu)
+            out_cpu,lse_cpu = out_cpu.to(out_gpu.device),lse_cpu.to(out_gpu.device)
+            for idx in range((bh+self.merge_split_dim-1)//self.merge_split_dim):
+                st,ed = idx* self.merge_split_dim,min(bh,idx* self.merge_split_dim+ self.merge_split_dim)
+                va,sa = out_gpu[:,st:ed,:].contiguous(),lse_gpu[:,st:ed].contiguous()
+                vb,sb = out_cpu[:,st:ed,:].contiguous(),lse_cpu[:,st:ed].contiguous()
+                out[:,st:ed,:],_ = flashinfer.merge_state(va,sa,vb,sb)
+                                                                        
                  
-                va_,sa_ = va[:,start:end,:].contiguous().pin_memory(),sa[:,start:end].contiguous().pin_memory()
-                vb_,sb_ = vb[:,start:end,:].contiguous(),sb[:,start:end].contiguous()
-                if self.in_place:
-                    flashinfer.merge_state_in_place(va_,sa_, vb_,sb_)
-                    v_out_,s_out_ = vb_.detach(),sb_.detach()
-                    v_out.append(v_out_);s_out.append(s_out_) 
+        else:
+            out_gpu,lse_gpu = out_gpu.contiguous(),lse_gpu.contiguous()
+            out_cpu,lse_cpu = out_cpu.contiguous(),lse_cpu.contiguous()
+            for idx in range((bh+self.merge_split_dim-1)//self.merge_split_dim):
+                st,ed = idx* self.merge_split_dim,min(bh,idx* self.merge_split_dim+ self.merge_split_dim)
+                flashinfer.merge_state_in_place(out_gpu[:,st:ed,:],
+                                                lse_gpu[:,st:ed],
+                                                out_cpu[:,st:ed,:],
+                                                lse_cpu[:,st:ed])
+            out = out_gpu
+        return out 
+ 
+  
 
-                else:
-                    v_out_,s_out_ =  flashinfer.merge_state(   va_,sa_, vb_,sb_ )
-                    v_out.append(v_out_);s_out.append(s_out_) 
+    @staticmethod
+    def hybrid_mha_pos( q: torch.Tensor, k: torch.Tensor, v: torch.Tensor ,
+                        k_cache_gpu: torch.Tensor, v_cache_gpu: torch.Tensor,
+                        k_cache_cpu: List[torch.Tensor], v_cache_cpu:List[torch.Tensor], 
+                        cos_gpu: torch.Tensor, sin_gpu: torch.Tensor,pos_ids_gpu: torch.Tensor,
+                        cos_cpu: List[torch.Tensor], sin_cpu: List[torch.Tensor], pos_ids_cpu:List[torch.Tensor],
+                        enable_mask: bool, mask: torch.Tensor
+                        )->Tuple[torch.Tensor,torch.Tensor,torch.Tensor,torch.Tensor]:
+        
+        batch_size, head_num, qs, head_dim = q.size()
+        q = q.view(-1,qs,head_dim)
+     
 
-            v_out,s_out = torch.cat(v_out,dim=1),torch.cat(s_out,dim=1)
+        q_cpu = q.to('cpu')
+
+
+        # launch cpu attn 
+        tasks = torch.jit.annotate(List[torch.jit.Future[Tuple[torch.Tensor, torch.Tensor]]], [])
+        parts = torch.jit.annotate(List[Tuple[int,int]], [])
+        
+        st,ed = 0,0
+        
+        for idx in range(len(k_cache_cpu)):
+            ed = st+k_cache_cpu[idx].size(0)
+            
+            tasks.append(fork( mha_lse, q_cpu[st:ed,:,:],k_cache_cpu[idx],v_cache_cpu[idx],
+                                        cos_cpu[idx],sin_cpu[idx],pos_ids_cpu[idx],False,mask))
+   
+            parts.append((st,ed))
+            st = ed 
+   
+        
+        # launch gpu attn 
+        k = k.view(-1,qs,head_dim)
+        v = v.view(-1,qs,head_dim)
+        k_gpu = torch.cat([k_cache_gpu,k],dim=-2)
+        v_gpu = torch.cat([v_cache_gpu,v],dim=-2)
+        
+        out_gpu,lse_gpu = mha_lse(q ,k_gpu,v_gpu,enable_mask,mask,cos_gpu,sin_gpu,pos_ids_gpu,enable_mask,mask)
+        
+
+        out_cpu = torch.empty(qs,batch_size*head_num,head_dim,dtype=torch.float16).pin_memory() 
+        lse_cpu = torch.empty(qs,batch_size*head_num,dtype=torch.float32).pin_memory() 
+
+        # sync cpu attn 
+        for task,(st,ed) in zip(tasks,parts):
+            out_cpu[:,st:ed,:],lse_cpu[:,st:ed] = wait(task)
+                
+    
+        
+        return out_gpu,lse_gpu,out_cpu ,lse_cpu
+    
+
+    @staticmethod
+    def hybrid_mha_wo_pos(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor ,
+                          k_cache_gpu: torch.Tensor, v_cache_gpu: torch.Tensor,
+                          k_cache_cpu: List[torch.Tensor], v_cache_cpu:List[torch.Tensor],
+                          enable_mask: bool, mask: torch.Tensor)->Tuple[torch.Tensor,torch.Tensor,torch.Tensor,torch.Tensor]:
+            
+        batch_size, head_num, qs, head_dim = q.size()
+        q = q.view(-1,qs,head_dim)
+        q_cpu = q.to('cpu')
+
+         
+
+        # launch cpu attn 
+        tasks = torch.jit.annotate(List[torch.jit.Future[Tuple[torch.Tensor, torch.Tensor]]], [])
+        parts = torch.jit.annotate(List[Tuple[int,int]], [])
+        
+        st,ed = 0,0
+        
+        for idx in range(len(k_cache_cpu)):
+            ed = st+k_cache_cpu[idx].size(0)
+            tasks.append(fork( mha_lse_wo_pos, q_cpu[st:ed,:,:],k_cache_cpu[idx],v_cache_cpu[idx],False,mask))
+            parts.append((st,ed))
+            st = ed 
+       
+        
+        # launch gpu attn 
+        # k = k.view(-1,qs,head_dim)
+        # v = v.view(-1,qs,head_dim)
+        k_gpu = torch.cat([k_cache_gpu,k.view(-1,qs,head_dim)],dim=-2)
+        v_gpu = torch.cat([v_cache_gpu,v.view(-1,qs,head_dim)],dim=-2)
+
+        out_gpu,lse_gpu = mha_lse_wo_pos(q ,k_gpu,v_gpu,enable_mask,mask)
+        out_cpu = torch.empty(qs,batch_size*head_num,head_dim,dtype=torch.float16).pin_memory() 
+        lse_cpu = torch.empty(qs,batch_size*head_num,dtype=torch.float32).pin_memory() 
+
+        # sync cpu attn
+        for task,(st,ed) in zip(tasks,parts):
+            out_cpu[:,st:ed,:],lse_cpu[:,st:ed] = wait(task)
+                
+        return out_gpu,lse_gpu,out_cpu,lse_cpu
+    
+
+    
+    @staticmethod
+    def mha_(q: torch.Tensor,k: torch.Tensor,v: torch.Tensor, 
+             enable_pos:  bool, cos: torch.Tensor, sin:  torch.Tensor, pos_ids:  torch.Tensor, 
+             enable_mask: bool, mask: torch.Tensor)-> torch.Tensor:
+ 
+        
+        if enable_pos:
+            k,v = apply_pos_emb(k,v,pos_ids,cos,sin)
+        k = k.permute(0,2,1) 
+        A = q@k 
+        if enable_mask:
+            A =  masking(A,mask)   
+        A_max, _ = A.max(dim=-1, keepdim=True) 
+        A  = A - A_max
+        e = torch.exp2(A).to(v.dtype)
+        se = e.sum(dim=-1, keepdim=True)
+        out = ((e / se) @ v) 
+
+        return out 
+     
+
+   
+
+    def forward(self, q: torch.Tensor,k: torch.Tensor,v: torch.Tensor,
+                k_cache_gpu:  torch.Tensor, v_cache_gpu:  torch.Tensor, k_cache_cpu: List[torch.Tensor], v_cache_cpu:  List[torch.Tensor],
+                mask: Optional[torch.Tensor]=None,
+                cos_gpu: Optional[torch.Tensor]=None, sin_gpu: Optional[torch.Tensor]=None,pos_ids_gpu:  Optional[torch.Tensor]=None,
+                cos_cpu: Optional[List[torch.Tensor]]=None, sin_cpu: Optional[List[torch.Tensor]]=None, pos_ids_cpu: Optional[List[torch.Tensor]]=None
+                ) -> torch.Tensor:
+       
+
+        qs =  q.size(-2) 
+
+   
+        
+        if mask:
+            mask = torch.tensor(0)
+            enable_mask = True  
+        else:
+            enable_mask = False  
+        
+        
+        if k_cache_cpu is not None:
+            if self.enable_pos:
+                out_gpu,lse_gpu,out_cpu,lse_cpu = self.hybrid_mha(q,k,v,k_cache_gpu , v_cache_gpu ,k_cache_cpu , v_cache_cpu, 
+                                                                  cos_gpu, sin_gpu, cos_cpu , sin_cpu , pos_ids_gpu , pos_ids_cpu ,enable_mask,mask )
+            else:
+                out_gpu,lse_gpu,out_cpu,lse_cpu = self.hybrid_mha(q,k,v,k_cache_gpu , v_cache_gpu ,k_cache_cpu , v_cache_cpu, enable_mask,mask )
+                 
+            out = self.merge_state(out_gpu,lse_gpu,out_cpu,lse_cpu)
+            out = out.reshape(qs,self.batch_size,self.head_num,self.head_dim).permute(1,0,2,3) 
             
         else:
-            if self.in_place:
-                flashinfer.merge_state_in_place(va_,sa_, vb_,sb_)
-                v_out,s_out = vb,sb
-            else:
-                v_out,s_out = flashinfer.merge_state(  va,sa,vb,sb)
-
-        
-            
-        s,d = v_out.size(0),v_out.size(2)
-        
-        v_out = v_out.reshape(s,-1,self.num_heads,d).permute(1,0,2,3) # b,s,h,d
-
-        # s_out shape: s,bh
-        return v_out,s_out
-    
-
-
-
-
+                
+            q = q.view(-1,qs,head_dim)
+            k = k.view(-1,qs,head_dim)
+            v = v.view(-1,qs,head_dim)
+            k_gpu = torch.cat([k_cache_gpu,k],dim=-2)
+            v_gpu = torch.cat([v_cache_gpu,v],dim=-2)
+            enable_pos = True if sin_gpu else False 
+             
+            out = self.mha(q,k_gpu,v_gpu,enable_pos,cos_gpu, sin_gpu,pos_ids_gpu,enable_mask,mask).reshape(-1,self.head_num,qs,self.head_dim)
+          
+       
+        return out
+ 
 
 
 
 #####################
 #      For Test     # 
 #####################
-
  
 
 
+def run_test(args):
+     
+    
+    
+    config = AutoConfig.from_pretrained(args.model_name)
+    print_args_info(args)
+    
 
-
-def test_correctness(args,log):
-    log = add_info(args,log)
+     
+    config = config
+    repeat = args.repeat
     batch_size = args.batch_size
-    hidden_size = args.hidden_size
-    num_heads = args.num_heads
-    start  = args.start_size
-    recent = args.recent_size
-    seq_len = args.seq_len
-    q_len = args.q_len
-    head_dim = hidden_size//num_heads
-    topk = args.topk
-    blk_size=args.blk_size
-   
-    assert  (start+recent<=seq_len),  f"start+recent greater than seq_len..."
-     
-    k_dim   =  2
-    k_cache = torch.randn(batch_size,num_heads,seq_len,head_dim, device='cpu').half()
-    v_cache = torch.randn(batch_size,num_heads,seq_len,head_dim, device='cpu').half()
-    q       = torch.randn(batch_size,num_heads,q_len,head_dim, device='cuda:0').half() 
-    k       = torch.randn(batch_size,num_heads,q_len,head_dim, device='cuda:0').half() 
-    v       = torch.randn(batch_size,num_heads,q_len,head_dim, device='cuda:0').half() 
-    
-     
-   
-    slice = DIM_TO_SLICE[k_dim]
-    mha_lse = mha_lse_methods(args.model_type)
-    merge_state = merge_state_(num_heads)
-    kv_len =  seq_len + q_len
-   
-    match args.model_type:
-        case 'llama':
-            
-            from transformers.models.llama.modeling_llama import LlamaRotaryEmbedding,rotate_half 
-            rotary_emb = LlamaRotaryEmbedding(head_dim)
-        case 'gpt-neox':
-
-            from transformers.models.gpt_neox.modeling_gpt_neox import GPTNeoXRotaryEmbedding,rotate_half
-            rotary_emb = GPTNeoXRotaryEmbedding(head_dim,2048)
-        case 'opt':
-            args.RoPE = False 
-
-
-    #####################
-    # Normal Attention  # 
-    #####################
-
-    q_ref = q
-    k_ref = torch.cat([k_cache,k.cpu()],dim=k_dim)
-    v_ref = torch.cat([v_cache,v.cpu()],dim=k_dim)
-    if args.RoPE:
-        def apply_rotary_pos_emb_single(x, cos, sin, position_ids):
-            
-            # The first two dimensions of cos and sin are always 1, so we can `squeeze` them.
-            cos = cos.squeeze(1).squeeze(0)  # [seq_len, dim]
-            sin = sin.squeeze(1).squeeze(0)  # [seq_len, dim]
-            cos = cos[position_ids].unsqueeze(1)  # [bs, 1, seq_len, dim]
-            sin = sin[position_ids].unsqueeze(1)  # [bs, 1, seq_len, dim]
-            x_embed = (x * cos) + (rotate_half(x) * sin)
-            return x_embed
- 
-        cos, sin = rotary_emb(v_cache,kv_len)
-       
-        q_ref =  apply_rotary_pos_emb_single(q_ref.cpu(), cos, sin, torch.arange(kv_len-q_len,kv_len).unsqueeze(0))
-        k_ref = apply_rotary_pos_emb_single(k_ref, cos, sin, torch.arange(kv_len).unsqueeze(0))
-    
-          
-    v_reference_nomal,_ = mha_lse(q_ref.cpu() ,k_ref.cpu(),v_ref.cpu())  # b s h d 
-    v_reference_nomal = v_reference_nomal.reshape(-1,batch_size,num_heads,head_dim).permute(1,0,2,3)
-    print(log)
-    
-    kv_cache = (k_cache,v_cache)
-     
-    k_blk_min = torch.randn(batch_size,num_heads,seq_len//blk_size,head_dim, device='cpu').half()
-    k_blk_max = torch.randn(batch_size,num_heads,seq_len//blk_size,head_dim, device='cpu').half()
- 
-    blk_idx = [(start,start+blk_size) for start in range(0,seq_len,blk_size)]
- 
-    blk_dim_min_max = (k_blk_min,k_blk_max)
-    block_selection = block_selection_(blk_size,32)
-    st = time.time()
-    selectd_k,selected_v  = block_selection(q.cpu(),blk_dim_min_max, blk_idx,kv_cache,0,topk)
- 
-    _,_ = mha_lse(q.cpu(),selectd_k,selected_v)
-    print(f"Block selection + attention time: {time.time()-st}, ")
-    #####################
-    #   CPU Attention   # 
-    #####################
-    q_cpu = q.cpu() 
-    k_cpu = torch.cat([slice(k_cache,start,seq_len-recent),k.cpu()],dim=k_dim)
-    v_cpu = torch.cat([slice(v_cache,start,seq_len-recent),v.cpu()],dim=k_dim)
-     
-
-    if args.RoPE: 
-        q_cpu = apply_rotary_pos_emb_single(q_cpu, cos, sin, torch.arange(kv_len-q_len,kv_len).unsqueeze(0))
-        position_ids = torch.cat([  
-                torch.arange(start, seq_len-recent, device='cpu'),
-                torch.arange(kv_len-q_len, kv_len, device='cpu')
-                ],dim=0).unsqueeze(0)
-        k_cpu = apply_rotary_pos_emb_single(k_cpu, cos, sin,position_ids)
-     
-     
-    st = time.time()
-    va,sa = mha_lse(q_cpu,k_cpu,v_cpu)
-    print(f"CPU attention length: {seq_len-start-recent}, compute time: {time.time()-st}, ")
-
-    #####################
-    #   GPU Attention   # 
-    #####################
-    q_gpu = q
-    k_gpu = torch.cat([slice(k_cache,0,start),slice(k_cache,seq_len-recent,seq_len),k.cpu()],dim=k_dim )
-    v_gpu = torch.cat([slice(v_cache,0,start),slice(v_cache,seq_len-recent,seq_len),v.cpu()] ,dim=k_dim )
-
-    if args.RoPE:
-        q_gpu = q_cpu.cuda()
-        k_gpu = apply_rotary_pos_emb_single(k_gpu, cos, sin, torch.cat([torch.arange(0,start),torch.arange(seq_len-recent,kv_len)],dim=0 ).unsqueeze(0))
+    head_num = config.num_attention_heads
+    head_dim = config.hidden_size//head_num 
+    gpu_cache_size = args.gpu_cache_size
+    cpu_cache_size = args.cpu_cache_size
+    qs = args.qs
+    head_split_num = args.head_split_num
         
-    st = time.time() 
-    vb,sb = mha_lse(q_gpu ,k_gpu.cuda(),v_gpu.cuda())
-    print(f"GPU attention length: {start+recent}, compute + transfer time: {time.time()-st}, ")
+    global apply_pos_emb
+    global masking   
 
     
-    v_out,_ = merge_state( va,sa,vb,sb )
+    apply_pos_emb = apply_pos_emb_(config)
+    masking = masking_(config)
     
-    acc = check_eq(v_out.cpu(),v_reference_nomal)  
+    hybrid_attn  = AttnMethods( batch_size, config)
+    head_num = config.num_attention_heads
+    head_dim = config.hidden_size//head_num 
+    
+    
+    q = torch.randn(batch_size,head_num,qs,head_dim,dtype=torch.float16).cuda()
+    k = torch.randn(batch_size,head_num,qs,head_dim,dtype=torch.float16).cuda()
+    v = torch.randn(batch_size,head_num,qs,head_dim,dtype=torch.float16).cuda()
+    k_cache_cpu_   = torch.randn(batch_size*head_num,cpu_cache_size,head_dim,dtype=torch.float16)
+    v_cache_cpu_   = torch.randn(batch_size*head_num,cpu_cache_size,head_dim,dtype=torch.float16)
+
+    k_cache_gpu = torch.randn(batch_size*head_num,gpu_cache_size,head_dim,dtype=torch.float16).cuda()
+    v_cache_gpu = torch.randn(batch_size*head_num,gpu_cache_size,head_dim,dtype=torch.float16).cuda()
+    
+    hdim = head_num//head_split_num
+    k_cache_cpu = [k_cache_cpu_[idx*hdim:idx*hdim+hdim,:,:] for idx in  range(batch_size*head_split_num)]
+    v_cache_cpu = [v_cache_cpu_[idx*hdim:idx*hdim+hdim,:,:] for idx in  range(batch_size*head_split_num)]
+        
+ 
+    
+    
+    t = []
+    for _ in range(repeat):
+        torch.cuda.synchronize()
+        st = time.time()
+        out_test  =  hybrid_attn(q,k,v,k_cache_gpu,v_cache_gpu, k_cache_cpu,v_cache_cpu) 
+        torch.cuda.synchronize()
+        t.append(time.time()-st)  
+    print(f"hybrid compute: {np.mean(t[repeat//2:])}")
+
+    
+    
+
+    k_cache_cpu_gpu = k_cache_cpu_.cuda().view(-1,cpu_cache_size,head_dim)
+    v_cache_cpu_gpu = v_cache_cpu_.cuda().view(-1,cpu_cache_size,head_dim)
+
+    t = []
+    for _ in range(repeat):
+        torch.cuda.synchronize()
+        st = time.time()
+        q_ = q.view(-1,qs,head_dim)
+        k_ = k.view(-1,qs,head_dim)
+        v_ = v.view(-1,qs,head_dim)
+        k_gpu = torch.cat([k_cache_cpu_gpu,k_cache_gpu,k_],dim=-2)
+        v_gpu = torch.cat([v_cache_cpu_gpu,v_cache_gpu,v_],dim=-2)
+        out_ref  = hybrid_attn.mha(q_,k_gpu,v_gpu,False,None,None,None,False,None)
+        out_ref =  out_ref.reshape(-1, head_num,qs, head_dim).permute(0,2,1,3) 
+        torch.cuda.synchronize()
+        t.append(time.time()-st)
+        del k_gpu
+        del v_gpu
+    print(f"gpu compute: {np.mean(t[repeat//2:])} ")
+
+    
+    
+    k_cache_gpu_cpu = k_cache_gpu.cpu()
+    v_cache_gpu_cpu = v_cache_gpu.cpu()
+    t = []
+    for _ in range(repeat):
+        torch.cuda.synchronize()
+        st = time.time()
+        q_ = q.view(-1,qs,head_dim).cpu()
+        k_ = k.view(-1,qs,head_dim).cpu()
+        v_ = v.view(-1,qs,head_dim).cpu()
+        k_cpu = torch.cat([k_cache_cpu_.view(-1,cpu_cache_size,head_dim),k_cache_gpu_cpu,k_],dim=-2)
+        v_cpu = torch.cat([v_cache_cpu_.view(-1,cpu_cache_size,head_dim),v_cache_gpu_cpu,v_],dim=-2)
+        out_ref  = hybrid_attn.mha(q_,k_cpu,v_cpu,False,None,None,None,False,None)
+        out_ref =  out_ref.reshape(-1, head_num,qs, head_dim).permute(0,2,1,3)
+        torch.cuda.synchronize()
+        t.append(time.time()-st)
+        del k_cpu
+        del v_cpu
+        
+    print(f"cpu compute: {np.mean(t[repeat//2:])} ")
+
+
+        
+    t = []
+    for _ in range(repeat):
+        torch.cuda.synchronize()
+        st = time.time()
+        q_ = q.view(-1,qs,head_dim)
+        k_ = k.view(-1,qs,head_dim)
+        v_ = v.view(-1,qs,head_dim)
+        k_gpu = torch.cat([k_cache_cpu_.cuda().view(-1,cpu_cache_size,head_dim),k_cache_gpu,k_],dim=-2)
+        v_gpu = torch.cat([v_cache_cpu_.cuda().view(-1,cpu_cache_size,head_dim),v_cache_gpu,v_],dim=-2)
+        out_ref  = hybrid_attn.mha(q_,k_gpu,v_gpu,False,None,None,None,False,None)
+        out_ref =  out_ref.reshape(-1, head_num,qs, head_dim).permute(0,2,1,3) 
+        torch.cuda.synchronize()
+        t.append(time.time()-st)
+        del k_gpu
+        del v_gpu
+    print(f"load gpu compute: {np.mean(t[repeat//2:])} ")
+    
+
+ 
+
+    acc = check_eq(out_test,out_ref)  
     assert  (acc>0.9),  f"accuracy {acc*100:.4}%, merge state fail..."
-    print(f"Merge success, accuracy {acc*100:.4}%")
+    print(f"Merge accuracy {acc*100:.4}%")
 
 
     
@@ -355,27 +554,25 @@ def test_correctness(args,log):
 
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+if __name__ == "__main__": 
     
-    
-    parser.add_argument("--start_size", type=int, default=4)
-    parser.add_argument("--recent_size", type=int, default=1000) 
-    parser.add_argument("--seq_len", type=int, default=100000)
-    parser.add_argument("--q_len", type=int, default=1)
-    parser.add_argument("--topk", type=int, default=10)
-    parser.add_argument("--blk_size", type=int, default=100)
-
-    # model config 
-    parser.add_argument("--num_heads", type=int, default=32)
-    parser.add_argument("--hidden_size", type=int, default=4096)
-    parser.add_argument("--model_type", type=str, default="opt")
-    parser.add_argument("--RoPE", type=bool, default=True )
-    
-    # test config 
-    parser.add_argument("--repeat", type=int, default=10)
-    parser.add_argument("--batch_size", type=int, default=1)
+    import time 
+    import logging 
+    import argparse        
+    import numpy as np
+    from beyond.utils import *
+    from transformers import AutoConfig
      
+    logger = logging.getLogger(__name__)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--cpu_cache_size", type=int, default=2000)
+    parser.add_argument("--gpu_cache_size", type=int, default=1000)
+    parser.add_argument("--qs", type=int, default=2)
+    parser.add_argument("--head_split_num", type=int, default=8)
+    parser.add_argument("--repeat", type=int, default=100)
+    parser.add_argument("--batch_size", type=int, default=10)
+    parser.add_argument("--model_name", type=str, default= "facebook/opt-66b")
     args = parser.parse_args()
-    test_correctness(args,"")
+
+    run_test(args)
      

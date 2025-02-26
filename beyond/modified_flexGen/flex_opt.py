@@ -29,8 +29,8 @@ import logging
 logger = logging.getLogger(__name__)
 ###########################
  
-from beyond.loading import * 
-from beyond.KVcache_manager import KVCache_manager_
+from beyond.Loading import * 
+from beyond.KVCache_Manager import KVCacheManager  
  
 os.environ["CUDA_LAUNCH_BLOCKING"] = "0"
 ###########################
@@ -456,10 +456,10 @@ class SelfAttention:
              (w_ln, _), (b_ln, _)) = weight_read_buf.val
         
 
-         
+        A_gpu,A_cpu = None,None 
         if i == 0:  # prefill
             mask, donate[1] = attention_mask.val.smart_copy(self.compute)
-            h, new_k_cache, new_v_cache = self.compute.mha(h, mask, w_q, b_q,
+            h, new_k_cache, new_v_cache,A_gpu = self.compute.mha(h, mask, w_q, b_q,
                 w_k, b_k, w_v, b_v, w_out, b_out, w_ln, b_ln, n_head, donate,
                 self.policy.compress_cache, self.policy.comp_cache_config)
              
@@ -468,33 +468,18 @@ class SelfAttention:
              
             k_cache_gpu,v_cache_gpu,k_cache_cpu,v_cache_cpu = self.KVCache_manager(self.layer_id) # b,h,s,d
              
-            torch.cuda.synchronize()
-            # self.KVCache_manager.preload_stream.synchronize()
-            # self.KVCache_manager.copy_stream.synchronize()
-            
-            cpu_attn_size = 0
-            start_size  = self.KVCache_manager.start_sizes[self.layer_id]
-            if k_cache_cpu is not None:
-                cpu_attn_size = self.KVCache_manager.cpu_attn_sizes[self.layer_id]
-                 
-            
-            ###########################################
-            # log kv stats 
-            # if self.layer_id==0:
-            #     info = f"GPU cache size: {k_cache_gpu.size(-2)}"
-            #     if k_cache_cpu is not None:  info +=  f" | CPU cache size: {k_cache_cpu.size(-2)}"
-            #     logger.info(info)
-            ###########################################
+           
+           
 
             mask, donate[1] = attention_mask.val.smart_copy(self.attention_compute)
-            h, new_k_cache, new_v_cache = self.compute.mha_gen(h, mask, w_q,
+            h, new_k_cache, new_v_cache,A_gpu,A_cpu = self.compute.mha_gen(h, mask, w_q,
                 b_q, w_k, b_k, w_v, b_v, w_out, b_out, w_ln, b_ln, n_head,
                 k_cache_gpu,v_cache_gpu,k_cache_cpu,v_cache_cpu, donate, self.policy.attn_sparsity,
-                self.policy.compress_cache, self.policy.comp_cache_config, cpu_attn_size,start_size)
+                self.policy.compress_cache, self.policy.comp_cache_config )
         
-    
-        self.KVCache_manager.add_kv_cache_by_layer(self.layer_id,  (new_k_cache, new_v_cache))
-        self.KVCache_manager.preload_layer_kv(self.layer_id,h.device.name)
+        
+        self.KVCache_manager.add_cache(self.layer_id, new_k_cache, new_v_cache,A_gpu,A_cpu)
+        self.KVCache_manager.preload(self.layer_id)
         hidden.val = h
 
 
@@ -1264,41 +1249,26 @@ def run_flexgen(args):
     ###################################
     #             beyond              #
     ###################################
+    layer_num = opt_config.num_hidden_layers
+    device_map = {}
+    for i in range(layer_num):
+        device_map[str(i)] = args.device
+     
+    KVCache_manager = KVCacheManager(opt_config,device_map,args.gpu_batch_size,False,
+                                     max_blk_gpu=args.max_blk_gpu,
+                                     max_blk2gpu=args.max_blk2gpu,
+                                     block_size=128)
+     
 
-    start_size=args.start_size
-    recent_size=args.recent_size
-    global layer_idx
-    KVCache_manager = KVCache_manager_(
-        start_size=start_size,
-        recent_size=recent_size,
-        k_seq_dim=2,
-        v_seq_dim=2,
-        head_dim=opt_config.hidden_size//opt_config.n_head,
-        num_heads=opt_config.n_head,
-        num_layers=opt_config.num_hidden_layers,
-        gpu_cache_max=20000,
-        cpu_attn_size=20000,
-        copy_stream = torch.cuda.Stream(),
-        preload_stream = torch.cuda.Stream(),
-        gpu_cache_device="cpu",
-    )
-    
- 
-     
-    def add_module(model):
-        for   module in reversed(model.layers):
-            # if isinstance(module, InputEmbed):
-            #     module.KVCache_manager = KVCache_manager
-            if isinstance(module, SelfAttention):
-     
-                module.KVCache_manager = KVCache_manager
+    for  module in reversed(model.layers):
+        if isinstance(module, SelfAttention):
+            module.KVCache_manager = KVCache_manager
                  
 
     torch.cuda.reset_peak_memory_stats()
     model = OptLM(opt_config, env, args.path, policy) 
     model_size = torch.cuda.max_memory_allocated("cuda:0") / 1024**2
-    add_module(model)
-    KVCache_manager.print_coverage()
+    
     ###################################
      
     try:
@@ -1343,9 +1313,16 @@ def run_flexgen(args):
     print("=================================================")
 
 def add_parser_arguments(parser):
-    parser.add_argument("--num_thread", type=int, default=48)
-    parser.add_argument("--start_size", type=int, default=4)
-    parser.add_argument("--recent_size", type=int, default=30)
+    #############################
+    # Beyond settings 
+    parser.add_argument("--device", type=str, default="cuda:0")
+    parser.add_argument("--num_thread", type=int, default=32)
+    parser.add_argument("--block_size", type=int, default=128)
+    parser.add_argument("--max_blk_gpu", type=int, default=1)
+    parser.add_argument("--max_blk2gpu", type=int, default=1)
+  
+
+    #############################
     parser.add_argument("--model", type=str, default="facebook/opt-6.7b",
         help="The model name.")
     parser.add_argument("--path", type=str, default="~/opt_weights",

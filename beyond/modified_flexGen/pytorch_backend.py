@@ -353,11 +353,17 @@ class TorchDevice:
         attn_weights = attn_weights.view(b, n_head, s, s)
         attn_weights = torch.where(mask, attn_weights, -1e4)
         attn_weights = attn_weights.view(b * n_head, s, s)
+
+
         attn_weights = F.softmax(attn_weights, dim=2)
-        #attn_weights = F.softmax(attn_weights, dim=2, dtype=torch.float32).to(torch.float16)
-        # shape: (b, n_head, s, head_dim)
+        
+
+        e = torch.exp2(attn_weights).to(v.dtype)
+        se = e.sum(dim=-1, keepdim=True)
+        attn_weights  = e / se
+      
         value = torch.bmm(attn_weights, v).view(b, n_head, s, head_dim)
-        # shape: (b, s, h)
+         
         value = value.transpose(1, 2).reshape(b, s, h)
         value = F.linear(value, w_out.data, bias=b_out.data)
 
@@ -370,13 +376,13 @@ class TorchDevice:
         k = k.reshape(b,n_head,head_dim,s).permute(0, 1, 3,2)
         v = v.reshape(b,n_head,s,head_dim) 
          
-        return TorchTensor.create_from_torch(value, self), k, v
+        return TorchTensor.create_from_torch(value, self), k, v,attn_weights
 
      
 
     def mha_gen(self, inputs, attention_mask, w_q, b_q, w_k, b_k, w_v, b_v,
                 w_out, b_out, w_ln, b_ln, n_head, k_cache_gpu,v_cache_gpu,k_cache_cpu,v_cache_cpu, donate,
-                attn_sparsity, compress_cache, comp_config, cpu_attn_size,start_size):
+                attn_sparsity, compress_cache, comp_config):
         """Multi-head attention (decoding phase)."""
  
         # decompress weights
@@ -403,87 +409,8 @@ class TorchDevice:
         k_new = k.view(b, q_len, n_head, head_dim).permute(0, 2, 1, 3)
         v_new = v.view(b, q_len, n_head, head_dim).permute(0, 2, 1, 3)
          
-       
+        attn_output,A_gpu,A_cpu  =  self.hybrid_attn(q,k,v,k_cache_gpu,v_cache_gpu, k_cache_cpu,v_cache_cpu) 
 
-          
-        
-        kv_seq_len = q_len
-        if k_cache_gpu is not None:
-
-           
-
-            kv_seq_len += k_cache_gpu.size(-2) 
-            k_cache_gpu = torch.cat([k_cache_gpu, k_new], dim=2)
-            v_cache_gpu = torch.cat([v_cache_gpu, v_new], dim=2)
-        else:
-            k_cache_gpu = k_new
-            v_cache_gpu = v_new
-        
-        
-        if k_cache_cpu is not None:
-            cpu_attn_size = min(k_cache_cpu.size(-2) ,cpu_attn_size)
-            kv_seq_len += cpu_attn_size
-             
-            
-        # mask = attention_mask = attention_mask_.data 
-
-        
-        # Mix CPU&GPU attention
-        if k_cache_cpu is not None and cpu_attn_size!=0:
-            
-
-            mha_lse = mha_lse_methods("flexgen-opt")
-            merge_state = merge_state_(n_head)
-            # attention_mask_q = attention_mask  if q_len!=1 else None 
-            #####################
-            #   CPU Attention   # 
-            #####################
-            with torch.cuda.stream(self.cpu_stream):
-                
- 
-                
-                # k_cache_cpu = torch.cat([k_cache_cpu, k_new.to('cpu'  )], dim=2)
-                # v_cache_cpu = torch.cat([v_cache_cpu, v_new.to('cpu'  )], dim=2)
-                
-
-                q_cpu = q.detach().to('cpu',non_blocking=True)
-                # attention_mask_q_cpu = attention_mask_q.to('cpu') if attention_mask_q is not None else attention_mask_q 
-              
-                v_cpu,s_cpu = mha_lse(q_cpu,k_cache_cpu,v_cache_cpu,None)
-                
-            
-            
-            #####################   
-            #   GPU Attention   # 
-            ##################### 
- 
-              
-        
-            v_gpu,s_gpu = mha_lse(q,k_cache_gpu,v_cache_gpu,None)
-            
-            
-            #####################
-            #    Merge State    # 
-            ##################### 
-            self.cpu_stream.synchronize()
-            # torch.cuda.synchronize()
-            attn_output,_ = merge_state(v_cpu,s_cpu,v_gpu,s_gpu)
-             
-
-            
-            # Default Full GPU attention
-        else:   
-            
-                 
-            
-            # subtract maximum value to improve numerical stability
-            attn_weights = torch.matmul(q, k_cache_gpu.transpose(2, 3))  
-            max_scores, _ = attn_weights.max(dim=-1, keepdim=True) 
-            attn_weights = attn_weights - max_scores
-            attn_weights = F.softmax(attn_weights, dim=-1, dtype=torch.float16).to(q.dtype)
-            attn_output = torch.matmul(attn_weights, v_cache_gpu)
-            attn_output = attn_output.transpose(1, 2).contiguous()
- 
         # b,qs,D
         value = attn_output.view(b, q_len, h)
         if w_out.data.dtype != value.dtype:
@@ -496,8 +423,9 @@ class TorchDevice:
         if donate[0]: inputs.delete()
         if donate[1]: attention_mask.delete()
  
-        return TorchTensor.create_from_torch(value, self), k_new, v_new
-
+        return TorchTensor.create_from_torch(value, self), k_new, v_new,A_gpu,A_cpu  
+    
+    
 
     def _attention_weights(self, q, k, mask, b, src_s, n_head):
         # shape: (b * n_head, 1, s)

@@ -1,4 +1,4 @@
-##  Attention Beyond the scope of GPU memory for LLMs inference  （古法编程）
+##  Attention Beyond the scope of GPU memory for LLMs inference  
 
 
 ![schemes](figures/comparison.png)
